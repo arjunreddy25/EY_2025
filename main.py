@@ -8,8 +8,8 @@ from agno.models.groq import Groq
 from agno.tools import tool
 from agno.db.sqlite import SqliteDb
 
-from tools import fetch_preapproved_offer, calculate_emi, fetch_kyc_from_crm
-from prompts import SALES_AGENT_PROMPT
+from tools import fetch_preapproved_offer, calculate_emi, fetch_kyc_from_crm, fetch_credit_score, validate_loan_eligibility
+from prompts import SALES_AGENT_PROMPT, VERIFICATION_AGENT_PROMPT
 
 
 load_dotenv()
@@ -138,11 +138,7 @@ verification_agent = Agent(
     name="Verification Agent",
     role="KYC Verification Executive",
     model=groq_model,
-    instructions=[
-        "Verify customer identity using CRM records",
-        "Confirm phone number and address",
-        "Do not approve or reject loans"
-    ],
+    instructions=[ VERIFICATION_AGENT_PROMPT ],
     tools=[fetch_kyc_from_crm],
 )
 
@@ -155,7 +151,7 @@ underwriting_agent = Agent(
         "Apply underwriting rules strictly",
         "Do not override decision logic"
     ],
-    tools=[get_credit_score, validate_loan_eligibility],
+    tools=[fetch_credit_score, validate_loan_eligibility],
 )
 
 sanction_agent = Agent(

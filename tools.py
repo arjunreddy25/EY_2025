@@ -128,3 +128,88 @@ def fetch_kyc_from_crm(customer_id: str) -> str:
         "address": data["address"],
         "kyc_verified": data["kyc_verified"]
     })
+
+
+
+@tool
+def fetch_credit_score(customer_id: str) -> str:
+    """
+    Mock Credit Bureau API.
+    Fetches credit score for a customer (out of 900).
+    """
+    customer = load_customer_data().get(customer_id)
+
+    if not customer:
+        return json.dumps({
+            "status": "error",
+            "message": "Customer not found in credit bureau"
+        })
+
+    return json.dumps({
+        "status": "success",
+        "customer_id": customer_id,
+        "credit_score": customer["credit_score"],
+        "score_range": "300-900"
+    })
+
+
+
+@tool
+def validate_loan_eligibility(
+    customer_id: str,
+    loan_amount: float,
+    tenure_months: int
+) -> str:
+    """
+    Underwriting rules engine (mock).
+    Applies deterministic loan eligibility rules.
+    """
+    customer = load_customer_data().get(customer_id)
+
+    if not customer:
+        return json.dumps({
+            "status": "rejected",
+            "reason": "Customer not found"
+        })
+
+    credit_score = customer["credit_score"]
+    salary = customer["salary"]
+    pre_limit = customer["pre_approved_limit"]
+
+    # Rule 1: Credit score check
+    if credit_score < 700:
+        return json.dumps({
+            "status": "rejected",
+            "reason": "Credit score below 700"
+        })
+
+    # Rule 2: Instant approval
+    if loan_amount <= pre_limit:
+        return json.dumps({
+            "status": "approved",
+            "approval_type": "instant",
+            "approved_amount": loan_amount
+        })
+
+    # Rule 3: Conditional approval
+    if loan_amount <= 2 * pre_limit:
+        emi = loan_amount / tenure_months
+
+        if emi <= 0.5 * salary:
+            return json.dumps({
+                "status": "conditional_approval",
+                "requires": "salary_slip_upload",
+                "approved_amount": loan_amount,
+                "emi": round(emi, 2)
+            })
+
+        return json.dumps({
+            "status": "rejected",
+            "reason": "EMI exceeds 50% of salary"
+        })
+
+    # Rule 4: Hard rejection
+    return json.dumps({
+        "status": "rejected",
+        "reason": "Amount exceeds 2x pre-approved limit"
+    })
