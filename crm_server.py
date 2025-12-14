@@ -1,10 +1,12 @@
 from fastapi import FastAPI, HTTPException
 import json
+import os
 
 app = FastAPI(title="Dummy CRM KYC Server")
 
-# Load customer data once at startup
-with open("data.json", "r") as f:
+# Load customer data once at startup using absolute path
+data_path = os.path.join(os.path.dirname(__file__), "data.json")
+with open(data_path, "r") as f:
     CUSTOMER_DATA = json.load(f)
 
 

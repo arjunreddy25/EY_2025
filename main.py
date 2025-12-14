@@ -42,66 +42,8 @@ def load_customer_data():
 CUSTOMER_DATA = load_customer_data()
 
 
-@tool
-def get_credit_score(customer_id: str) -> str:
-    """Fetch credit score from dummy credit bureau."""
-    customer = CUSTOMER_DATA.get(customer_id)
-    if not customer:
-        return json.dumps({
-            "status": "error",
-            "message": "Customer not found"
-        })
-
-    return json.dumps({
-        "status": "success",
-        "credit_score": customer["credit_score"],
-        "score_range": "300-900"
-    })
 
 
-@tool
-def validate_loan_eligibility(customer_id: str, loan_amount: float) -> str:
-    """Apply underwriting rules."""
-    customer = CUSTOMER_DATA.get(customer_id)
-    if not customer:
-        return json.dumps({
-            "status": "rejected",
-            "reason": "Customer not found"
-        })
-
-    credit_score = customer["credit_score"]
-    pre_approved = customer["pre_approved_limit"]
-    salary = customer["salary"]
-
-    if credit_score < 700:
-        return json.dumps({
-            "status": "rejected",
-            "reason": "Credit score below 700"
-        })
-
-    if loan_amount <= pre_approved:
-        return json.dumps({
-            "status": "instant_approval",
-            "approved_amount": loan_amount
-        })
-
-    if loan_amount <= 2 * pre_approved:
-        emi = loan_amount / 36
-        if emi <= 0.5 * salary:
-            return json.dumps({
-                "status": "conditional_approval",
-                "requires": "salary_slip_upload",
-                "approved_amount": loan_amount
-            })
-        return json.dumps({
-            "status": "rejected",
-            "reason": "EMI exceeds 50% of salary"
-        })
-
-    return json.dumps({
-        "status": "rejected",
-        "reason": "Amount exceeds 2x pre-approved limit"
-    })
 
 
 @tool

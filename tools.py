@@ -110,15 +110,37 @@ def fetch_kyc_from_crm(customer_id: str) -> str:
     """
     Fetch customer KYC details from CRM server.
     """
-    response = requests.get(f"{CRM_BASE_URL}/kyc/{customer_id}", timeout=5)
+    try:
+        response = requests.get(f"{CRM_BASE_URL}/kyc/{customer_id}", timeout=5)
+    except requests.exceptions.Timeout:
+        return json.dumps({
+            "status": "error",
+            "message": "CRM server request timed out"
+        })
+    except requests.exceptions.ConnectionError:
+        return json.dumps({
+            "status": "error",
+            "message": "Unable to connect to CRM server. Please ensure the server is running."
+        })
+    except requests.exceptions.RequestException as e:
+        return json.dumps({
+            "status": "error",
+            "message": f"Network error while fetching KYC details: {str(e)}"
+        })
 
     if response.status_code != 200:
         return json.dumps({
             "status": "error",
-            "message": "Unable to fetch KYC details"
+            "message": f"Unable to fetch KYC details (HTTP {response.status_code})"
         })
 
-    data = response.json()
+    try:
+        data = response.json()
+    except json.JSONDecodeError:
+        return json.dumps({
+            "status": "error",
+            "message": "Invalid response format from CRM server"
+        })
 
     return json.dumps({
         "status": "success",
@@ -193,14 +215,36 @@ def validate_loan_eligibility(
 
     # Rule 3: Conditional approval
     if loan_amount <= 2 * pre_limit:
-        emi = loan_amount / tenure_months
+        # Calculate EMI using proper reducing balance formula with interest rate
+        # Get interest rate based on credit score
+        if credit_score >= 800:
+            interest_rate = 9.5
+        elif credit_score >= 750:
+            interest_rate = 10.5
+        elif credit_score >= 700:
+            interest_rate = 11.0
+        else:
+            interest_rate = 12.5
+        
+        # Calculate EMI using reducing balance formula
+        monthly_rate = interest_rate / (12 * 100)
+        
+        if monthly_rate == 0:
+            emi = loan_amount / tenure_months
+        else:
+            emi = (
+                loan_amount
+                * monthly_rate
+                * (1 + monthly_rate) ** tenure_months
+            ) / ((1 + monthly_rate) ** tenure_months - 1)
 
         if emi <= 0.5 * salary:
             return json.dumps({
                 "status": "conditional_approval",
                 "requires": "salary_slip_upload",
                 "approved_amount": loan_amount,
-                "emi": round(emi, 2)
+                "emi": round(emi, 2),
+                "interest_rate": interest_rate
             })
 
         return json.dumps({
