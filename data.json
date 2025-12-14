@@ -1,0 +1,168 @@
+{
+  "CUST001": {
+    "name": "Rahul Sharma",
+    "age": 32,
+    "city": "Mumbai",
+    "phone": "9876543210",
+    "address": "123 Marine Drive, Mumbai - 400001",
+    "credit_score": 780,
+    "pre_approved_limit": 500000,
+    "current_loans": [],
+    "salary": 80000
+  },
+  "CUST002": {
+    "name": "Priya Patel",
+    "age": 28,
+    "city": "Delhi",
+    "phone": "9876543211",
+    "address": "45 Connaught Place, New Delhi - 110001",
+    "credit_score": 720,
+    "pre_approved_limit": 300000,
+    "current_loans": ["Home Loan"],
+    "salary": 60000
+  },
+  "CUST003": {
+    "name": "Amit Kumar",
+    "age": 35,
+    "city": "Bangalore",
+    "phone": "9876543212",
+    "address": "78 Koramangala 5th Block, Bangalore - 560095",
+    "credit_score": 850,
+    "pre_approved_limit": 1000000,
+    "current_loans": [],
+    "salary": 150000
+  },
+  "CUST004": {
+    "name": "Sneha Reddy",
+    "age": 26,
+    "city": "Hyderabad",
+    "phone": "9876543213",
+    "address": "12 Banjara Hills, Hyderabad - 500034",
+    "credit_score": 680,
+    "pre_approved_limit": 200000,
+    "current_loans": ["Car Loan"],
+    "salary": 45000
+  },
+  "CUST005": {
+    "name": "Vikram Singh",
+    "age": 42,
+    "city": "Pune",
+    "phone": "9876543214",
+    "address": "56 Koregaon Park, Pune - 411001",
+    "credit_score": 750,
+    "pre_approved_limit": 750000,
+    "current_loans": ["Home Loan", "Education Loan"],
+    "salary": 120000
+  },
+  "CUST006": {
+    "name": "Anjali Desai",
+    "age": 29,
+    "city": "Ahmedabad",
+    "phone": "9876543215",
+    "address": "34 Satellite Road, Ahmedabad - 380015",
+    "credit_score": 710,
+    "pre_approved_limit": 400000,
+    "current_loans": [],
+    "salary": 70000
+  },
+  "CUST007": {
+    "name": "Rajesh Iyer",
+    "age": 38,
+    "city": "Chennai",
+    "phone": "9876543216",
+    "address": "89 T Nagar, Chennai - 600017",
+    "credit_score": 650,
+    "pre_approved_limit": 150000,
+    "current_loans": ["Personal Loan", "Credit Card"],
+    "salary": 55000
+  },
+  "CUST008": {
+    "name": "Meera Nair",
+    "age": 31,
+    "city": "Kochi",
+    "phone": "9876543217",
+    "address": "23 MG Road, Kochi - 682016",
+    "credit_score": 790,
+    "pre_approved_limit": 600000,
+    "current_loans": ["Home Loan"],
+    "salary": 95000
+  },
+  "CUST009": {
+    "name": "Karan Malhotra",
+    "age": 24,
+    "city": "Gurgaon",
+    "phone": "9876543218",
+    "address": "67 DLF Phase 1, Gurgaon - 122002",
+    "credit_score": 620,
+    "pre_approved_limit": 100000,
+    "current_loans": ["Education Loan"],
+    "salary": 35000
+  },
+  "CUST010": {
+    "name": "Divya Joshi",
+    "age": 36,
+    "city": "Jaipur",
+    "phone": "9876543219",
+    "address": "45 C Scheme, Jaipur - 302001",
+    "credit_score": 730,
+    "pre_approved_limit": 450000,
+    "current_loans": ["Car Loan"],
+    "salary": 75000
+  },
+  "CUST011": {
+    "name": "Rohit Verma",
+    "age": 40,
+    "city": "Kolkata",
+    "phone": "9876543220",
+    "address": "78 Park Street, Kolkata - 700016",
+    "credit_score": 820,
+    "pre_approved_limit": 900000,
+    "current_loans": [],
+    "salary": 140000
+  },
+  "CUST012": {
+    "name": "Pooja Agarwal",
+    "age": 27,
+    "city": "Indore",
+    "phone": "9876543221",
+    "address": "12 MG Road, Indore - 452001",
+    "credit_score": 690,
+    "pre_approved_limit": 250000,
+    "current_loans": ["Personal Loan"],
+    "salary": 50000
+  },
+  "CUST013": {
+    "name": "Suresh Menon",
+    "age": 45,
+    "city": "Coimbatore",
+    "phone": "9876543222",
+    "address": "56 RS Puram, Coimbatore - 641002",
+    "credit_score": 800,
+    "pre_approved_limit": 800000,
+    "current_loans": ["Home Loan"],
+    "salary": 130000
+  },
+  "CUST014": {
+    "name": "Neha Kapoor",
+    "age": 33,
+    "city": "Chandigarh",
+    "phone": "9876543223",
+    "address": "34 Sector 17, Chandigarh - 160017",
+    "credit_score": 670,
+    "pre_approved_limit": 180000,
+    "current_loans": ["Car Loan", "Credit Card"],
+    "salary": 48000
+  },
+  "CUST015": {
+    "name": "Arjun Mehta",
+    "age": 30,
+    "city": "Surat",
+    "phone": "9876543224",
+    "address": "89 Athwa Lines, Surat - 395001",
+    "credit_score": 760,
+    "pre_approved_limit": 550000,
+    "current_loans": [],
+    "salary": 85000
+  }
+}
+
