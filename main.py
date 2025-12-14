@@ -5,7 +5,7 @@ from agno.tools import tool, Toolkit
 from agno.db.sqlite import SqliteDb
 import json
 
-# ============= MOCK DATA & TOOLS =============
+
 
 # Synthetic customer data (10 customers)
 CUSTOMER_DATA = {
@@ -15,10 +15,10 @@ CUSTOMER_DATA = {
     "CUST002": {"name": "Priya Patel", "age": 28, "city": "Delhi", "phone": "9876543211",
                 "address": "45 Connaught Place", "credit_score": 720, "pre_approved_limit": 300000,
                 "current_loans": ["Home Loan"], "salary": 60000},
-    # Add more customers...
+ 
 }
 
-# ============= CUSTOM TOOLS =============
+
 
 @tool
 def get_customer_from_crm(customer_id: str) -> str:
@@ -101,7 +101,7 @@ def generate_sanction_letter(customer_id: str, loan_amount: float, tenure: int) 
         })
     return json.dumps({"error": "Failed to generate"})
 
-# ============= WORKER AGENTS =============
+
 
 sales_agent = Agent(
     name="Sales Agent",
@@ -154,7 +154,7 @@ sanction_agent = Agent(
     tools=[generate_sanction_letter],
 )
 
-# ============= MASTER AGENT (TEAM) =============
+
 
 loan_sales_team = Team(
     name="Loan Sales Team",
@@ -174,7 +174,7 @@ loan_sales_team = Team(
     markdown=True,
 )
 
-# ============= RUN THE SYSTEM =============
+
 if __name__ == "__main__":
     # Simulate customer conversation
     loan_sales_team.print_response(
