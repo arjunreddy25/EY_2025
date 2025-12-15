@@ -13,6 +13,21 @@ def load_customer_data():
     except FileNotFoundError:
         return {}
 
+def calculate_interest_rate(credit_score: int) -> float:
+    """
+    Calculate interest rate based on credit score.
+    Centralized function to avoid duplication.
+    """
+    if credit_score >= 800:
+        return 9.5
+    elif credit_score >= 750:
+        return 10.5
+    elif credit_score >= 700:
+        return 11.0
+    else:
+        return 12.5
+
+
 def get_offer_mart_data():
     """Generate Offer Mart data from customer data."""
     customer_data = load_customer_data()
@@ -22,18 +37,17 @@ def get_offer_mart_data():
         credit_score = customer.get("credit_score", 700)
         pre_approved_limit = customer.get("pre_approved_limit", 0)
         
-        # Interest rate based on credit score
+        # Interest rate based on credit score (using centralized function)
+        interest_rate = calculate_interest_rate(credit_score)
+        
+        # Max tenure based on credit score
         if credit_score >= 800:
-            interest_rate = 9.5
             max_tenure = 60
         elif credit_score >= 750:
-            interest_rate = 10.5
             max_tenure = 60
         elif credit_score >= 700:
-            interest_rate = 11.0
             max_tenure = 48
         else:
-            interest_rate = 12.5
             max_tenure = 36
         
         offer_mart[customer_id] = {
@@ -45,6 +59,7 @@ def get_offer_mart_data():
     return offer_mart
 
 OFFER_MART = get_offer_mart_data()
+
 
 @tool
 def fetch_preapproved_offer(customer_id: str) -> str:
@@ -207,24 +222,33 @@ def validate_loan_eligibility(
 
     # Rule 2: Instant approval
     if loan_amount <= pre_limit:
+        # Calculate interest rate based on credit score
+        interest_rate = calculate_interest_rate(credit_score)
+        
+        # Calculate EMI for instant approval
+        monthly_rate = interest_rate / (12 * 100)
+        if monthly_rate == 0:
+            emi = loan_amount / tenure_months
+        else:
+            emi = (
+                loan_amount
+                * monthly_rate
+                * (1 + monthly_rate) ** tenure_months
+            ) / ((1 + monthly_rate) ** tenure_months - 1)
+        
         return json.dumps({
             "status": "approved",
             "approval_type": "instant",
-            "approved_amount": loan_amount
+            "approved_amount": loan_amount,
+            "interest_rate": interest_rate,
+            "emi": round(emi, 2)
         })
 
     # Rule 3: Conditional approval
     if loan_amount <= 2 * pre_limit:
         # Calculate EMI using proper reducing balance formula with interest rate
         # Get interest rate based on credit score
-        if credit_score >= 800:
-            interest_rate = 9.5
-        elif credit_score >= 750:
-            interest_rate = 10.5
-        elif credit_score >= 700:
-            interest_rate = 11.0
-        else:
-            interest_rate = 12.5
+        interest_rate = calculate_interest_rate(credit_score)
         
         # Calculate EMI using reducing balance formula
         monthly_rate = interest_rate / (12 * 100)
@@ -275,16 +299,10 @@ def generate_sanction_letter(customer_id: str, loan_amount: float, tenure: int, 
         })
     
     # Determine interest rate based on credit score if not provided
+    # Ideally, interest_rate should come from underwriting response
     if interest_rate is None:
         credit_score = customer.get("credit_score", 700)
-        if credit_score >= 800:
-            interest_rate = 9.5
-        elif credit_score >= 750:
-            interest_rate = 10.5
-        elif credit_score >= 700:
-            interest_rate = 11.0
-        else:
-            interest_rate = 12.5
+        interest_rate = calculate_interest_rate(credit_score)
     
     # Calculate EMI using reducing balance formula
     monthly_rate = interest_rate / (12 * 100)

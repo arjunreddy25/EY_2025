@@ -122,7 +122,8 @@ loan_sales_team = Team(
         "   - Explain why it's needed (loan amount exceeds pre-approved limit)",
         "   - Wait for customer to provide salary slip",
         "6. Sanction Agent: Trigger ONLY after loan is approved (instant or conditional)",
-        "   - Generate sanction letter with customer_id, loan_amount, tenure",
+        "   - Extract interest_rate from underwriting response (it's included in approval)",
+        "   - Generate sanction letter with customer_id, loan_amount, tenure, and interest_rate",
         "7. Handle Rejections: If loan is rejected, explain clearly and professionally",
         "   - Explain the reason (credit score, EMI too high, amount too high)",
         "   - Offer alternatives if appropriate",
@@ -141,7 +142,8 @@ loan_sales_team = Team(
     add_history_to_context=True,
     show_members_responses=False,
     markdown=True,
-    respond_directly=True
+    respond_directly=True,
+    share_member_interactions=True
 )
 
 
