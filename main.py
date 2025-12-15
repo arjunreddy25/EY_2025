@@ -148,6 +148,9 @@ loan_sales_team = Team(
 
 
 if __name__ == "__main__":
+    from agno.agent import RunEvent
+    from agno.team.team import TeamRunEvent
+    
     print("Loan Sales Assistant")
     print("Type 'exit' to quit\n")
 
@@ -159,8 +162,45 @@ if __name__ == "__main__":
             print("Session ended. Conversation saved.")
             break
 
-        loan_sales_team.print_response(
+        print("\nAssistant: ", end="", flush=True)
+        
+        content_started = False
+        stream = loan_sales_team.run(
             user_input,
             stream=True,
+            stream_events=True,
             session_id=session_id
         )
+        
+        for run_output_event in stream:
+            # Handle team-level events
+            if run_output_event.event in [TeamRunEvent.run_started]:
+                pass  # Team started
+            
+            if run_output_event.event in [TeamRunEvent.run_completed]:
+                pass  # Team completed
+            
+            # Handle team tool calls
+            if run_output_event.event in [TeamRunEvent.tool_call_started]:
+                print(f"\n🔧 [Tool: {run_output_event.tool.tool_name}]", end="", flush=True)
+            
+            if run_output_event.event in [TeamRunEvent.tool_call_completed]:
+                print(" ✓", end="", flush=True)
+            
+            # Handle member-level tool events
+            if run_output_event.event in [RunEvent.tool_call_started]:
+                if hasattr(run_output_event, 'agent_id'):
+                    print(f"\n🤖 [{run_output_event.agent_id}]", end="", flush=True)
+            
+            if run_output_event.event in [RunEvent.tool_call_completed]:
+                if hasattr(run_output_event, 'tool') and hasattr(run_output_event.tool, 'tool_name'):
+                    print(f" [{run_output_event.tool.tool_name}] ✓", end="", flush=True)
+            
+            # Handle content streaming - this is where tokens stream
+            if run_output_event.event in [TeamRunEvent.run_content]:
+                if not content_started:
+                    content_started = True
+                if hasattr(run_output_event, 'content') and run_output_event.content:
+                    print(run_output_event.content, end="", flush=True)
+        
+        print("\n")
