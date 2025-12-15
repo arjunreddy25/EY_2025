@@ -22,8 +22,9 @@ if not GROQ_API_KEY:
 
 
 groq_model = Groq(
-    id="qwen-qwq-32b",  # Qwen 32B model on Groq
+    id="qwen/qwen3-32b",  # Qwen 32B model on Groq
     api_key=GROQ_API_KEY,
+    temperature=0.7,  # Balanced creativity and speed
 )
 # Alternative model IDs to try if qwen-qwq-32b doesn't work:
 # - "qwen2.5-32b-instruct"
@@ -74,6 +75,7 @@ sales_agent = Agent(
     model=groq_model,
     instructions=[SALES_AGENT_PROMPT],
     tools=[fetch_preapproved_offer, calculate_emi],
+    
 )
 
 verification_agent = Agent(
@@ -82,6 +84,7 @@ verification_agent = Agent(
     model=groq_model,
     instructions=[ VERIFICATION_AGENT_PROMPT ],
     tools=[fetch_kyc_from_crm],
+    
 )
 
 underwriting_agent = Agent(
@@ -94,6 +97,7 @@ underwriting_agent = Agent(
         "Do not override decision logic"
     ],
     tools=[fetch_credit_score, validate_loan_eligibility],
+    
 )
 
 sanction_agent = Agent(
@@ -105,6 +109,7 @@ sanction_agent = Agent(
         "Return sanction letter details"
     ],
     tools=[generate_sanction_letter],
+    
 )
 
 
@@ -126,14 +131,18 @@ loan_sales_team = Team(
     ],
     instructions=[
         "You are the master orchestrator for personal loan sales",
-        "Follow workflow: Sales → Verification → Underwriting → Sanction",
-        "Maintain context and continuity",
-        "Never expose internal agent transitions"
+        "CRITICAL: Make only ONE delegation per user message. Do NOT split a single user request into multiple delegations.",
+        "For general inquiries about loans, processes, or pre-qualification, delegate to sales-agent with ONE comprehensive task covering all aspects.",
+        "Only delegate to verification-agent, underwriting-agent, or sanction-agent when explicitly required by the workflow stage.",
+        "When delegating, provide the complete context and all necessary information in a single task description.",
+        "Maintain context and continuity across conversations",
+        "Never expose internal agent transitions or system architecture"
     ],
     db=db,
     add_history_to_context=True,
-    show_members_responses=False,
+    show_members_responses=True,
     markdown=True,
+    respond_directly=True
 )
 
 
