@@ -5,11 +5,10 @@ from dotenv import load_dotenv
 from agno.agent import Agent
 from agno.team import Team
 from agno.models.groq import Groq
-from agno.tools import tool
 from agno.db.sqlite import SqliteDb
 
-from tools import fetch_preapproved_offer, calculate_emi, fetch_kyc_from_crm, fetch_credit_score, validate_loan_eligibility
-from prompts import SALES_AGENT_PROMPT, VERIFICATION_AGENT_PROMPT
+from tools import fetch_preapproved_offer, calculate_emi, fetch_kyc_from_crm, fetch_credit_score, validate_loan_eligibility, generate_sanction_letter
+from prompts import SALES_AGENT_PROMPT, VERIFICATION_AGENT_PROMPT, UNDERWRITING_AGENT_PROMPT
 
 
 load_dotenv()
@@ -43,32 +42,6 @@ def load_customer_data():
 CUSTOMER_DATA = load_customer_data()
 
 
-
-
-
-
-@tool
-def generate_sanction_letter(customer_id: str, loan_amount: float, tenure: int) -> str:
-    """Generate sanction letter metadata."""
-    customer = CUSTOMER_DATA.get(customer_id)
-    if not customer:
-        return json.dumps({
-            "status": "error",
-            "message": "Customer not found"
-        })
-
-    return json.dumps({
-        "status": "generated",
-        "letter_id": f"SL-{customer_id}-2024",
-        "customer_name": customer["name"],
-        "sanctioned_amount": loan_amount,
-        "tenure_months": tenure,
-        "interest_rate": "10.5%",
-        "pdf_url": f"/sanction_letters/{customer_id}.pdf"
-    })
-
-
-
 sales_agent = Agent(
     name="Sales Agent",
     role="Personal Loan Sales Executive",
@@ -91,11 +64,7 @@ underwriting_agent = Agent(
     name="Underwriting Agent",
     role="Loan Underwriting Officer",
     model=groq_model,
-    instructions=[
-        "Evaluate credit score and eligibility",
-        "Apply underwriting rules strictly",
-        "Do not override decision logic"
-    ],
+    instructions=[UNDERWRITING_AGENT_PROMPT],
     tools=[fetch_credit_score, validate_loan_eligibility],
     
 )
@@ -130,14 +99,47 @@ loan_sales_team = Team(
         sanction_agent
     ],
     instructions=[
-        "You are the master orchestrator for personal loan sales",
-        "Follow workflow: Sales → Verification → Underwriting → Sanction",
-        "Maintain context and continuity",
-        "Never expose internal agent transitions"
+        "You are the Master Agent (Agentic AI Controller) for personal loan sales at a regulated NBFC.",
+        "You own the entire conversation and maintain a human-like, persuasive, and polite tone.",
+        "",
+        "DECISION LOGIC - When to trigger each agent:",
+        "1. Start: Engage customer and pitch personal loan when they inquire",
+        "   - Early in conversation, ask for customer ID (format: CUST001, CUST002, etc.)",
+        "   - Store customer_id in context for all subsequent agent calls",
+        "2. Sales Agent: Delegate when customer shows interest in exploring loan options",
+        "   - Let Sales Agent negotiate loan amount, tenure, and EMI",
+        "   - Wait for Sales Agent to finalize loan request",
+        "3. Verification Agent: Trigger ONLY after customer agrees to proceed with loan application",
+        "   - First, obtain customer_id from customer (ask: 'May I have your customer ID?' or extract from context)",
+        "   - Customer IDs are in format: CUST001, CUST002, CUST003, etc.",
+        "   - Delegate KYC verification task with customer_id: 'Verify KYC for customer_id: CUST001'",
+        "   - Wait for verification status (verified/failed)",
+        "4. Underwriting Agent: Trigger ONLY after KYC is verified successfully",
+        "   - Delegate loan eligibility evaluation with customer_id and loan details",
+        "   - Provide: customer_id, loan_amount, tenure_months",
+        "   - Receive decision: approved/conditional_approval/rejected",
+        "5. Salary Slip Request: If underwriting returns 'conditional_approval', request salary slip upload",
+        "   - Explain why it's needed (loan amount exceeds pre-approved limit)",
+        "   - Wait for customer to provide salary slip",
+        "6. Sanction Agent: Trigger ONLY after loan is approved (instant or conditional)",
+        "   - Generate sanction letter with customer_id, loan_amount, tenure",
+        "7. Handle Rejections: If loan is rejected, explain clearly and professionally",
+        "   - Explain the reason (credit score, EMI too high, amount too high)",
+        "   - Offer alternatives if appropriate",
+        "",
+        "CRITICAL RULES:",
+        "- Never expose internal agent names or system architecture to customer",
+        "- Never mention CRM systems, backend systems, or system operational status",
+        "- Do NOT mention system maintenance, restoration, or downtime",
+        "- Always maintain conversational continuity - customer talks only to you",
+        "- Handle all approvals, rejections, and explanations yourself",
+        "- Follow the workflow strictly: Sales → Verification → Underwriting → Sanction",
+        "- If any step fails, pause and inform customer clearly without mentioning system issues",
+        "- End conversation professionally after sanction letter or rejection"
     ],
     db=db,
     add_history_to_context=True,
-    show_members_responses=True,
+    show_members_responses=False,
     markdown=True,
     respond_directly=True
 )

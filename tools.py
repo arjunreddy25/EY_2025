@@ -257,3 +257,54 @@ def validate_loan_eligibility(
         "status": "rejected",
         "reason": "Amount exceeds 2x pre-approved limit"
     })
+
+
+@tool
+def generate_sanction_letter(customer_id: str, loan_amount: float, tenure: int, interest_rate: float = None) -> str:
+    """
+    Generate automated PDF sanction letter for approved loans.
+    Includes customer name, approved amount, interest rate, tenure, EMI, and approval date.
+    """
+    from datetime import datetime
+    
+    customer = load_customer_data().get(customer_id)
+    if not customer:
+        return json.dumps({
+            "status": "error",
+            "message": "Customer not found"
+        })
+    
+    # Determine interest rate based on credit score if not provided
+    if interest_rate is None:
+        credit_score = customer.get("credit_score", 700)
+        if credit_score >= 800:
+            interest_rate = 9.5
+        elif credit_score >= 750:
+            interest_rate = 10.5
+        elif credit_score >= 700:
+            interest_rate = 11.0
+        else:
+            interest_rate = 12.5
+    
+    # Calculate EMI using reducing balance formula
+    monthly_rate = interest_rate / (12 * 100)
+    if monthly_rate == 0:
+        emi = loan_amount / tenure
+    else:
+        emi = (loan_amount * monthly_rate * (1 + monthly_rate) ** tenure) / ((1 + monthly_rate) ** tenure - 1)
+    
+    approval_date = datetime.now().strftime("%Y-%m-%d")
+    
+    return json.dumps({
+        "status": "generated",
+        "letter_id": f"SL-{customer_id}-{datetime.now().strftime('%Y%m%d')}",
+        "customer_name": customer["name"],
+        "customer_id": customer_id,
+        "sanctioned_amount": round(loan_amount, 2),
+        "interest_rate": f"{interest_rate}%",
+        "tenure_months": tenure,
+        "monthly_emi": round(emi, 2),
+        "approval_date": approval_date,
+        "pdf_url": f"/sanction_letters/SL-{customer_id}-{datetime.now().strftime('%Y%m%d')}.pdf",
+        "message": "Sanction letter PDF generated successfully"
+    })
