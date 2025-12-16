@@ -29,7 +29,7 @@
     "address": "78 Koramangala 5th Block, Bangalore",
     "credit_score": 850,
     "pre_approved_limit": 1000000,
-    "salary": 150000,
+    "salary": 15000,
     "current_loans": []
   },
   "CUST004": {
@@ -62,7 +62,7 @@
     "address": "34 Satellite Road, Ahmedabad",
     "credit_score": 710,
     "pre_approved_limit": 400000,
-    "salary": 70000,
+    "salary": 30000,
     "current_loans": []
   },
   "CUST007": {

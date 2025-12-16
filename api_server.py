@@ -90,14 +90,11 @@ async def chat_endpoint(chat: ChatMessage):
     For streaming, use WebSocket endpoint /ws/chat or SSE endpoint /chat/stream.
     """
     try:
-        loop = asyncio.get_event_loop()
-        response = await loop.run_in_executor(
-            None,
-            lambda: loan_sales_team.run(
-                chat.message,
-                stream=False,
-                session_id=chat.session_id
-            )
+        # Use arun() directly for async execution
+        response = await loan_sales_team.arun(
+            chat.message,
+            stream=False,
+            session_id=chat.session_id
         )
         return {
             "response": response.content if hasattr(response, 'content') else str(response),
@@ -118,37 +115,14 @@ async def chat_stream_endpoint(message: str, session_id: str = "default_session"
         try:
             content_started = False
             
-            # Use queue to bridge sync generator to async
-            queue = asyncio.Queue()
-            loop = asyncio.get_event_loop()
-            
-            def run_stream():
-                """Run sync stream in thread and put events in queue."""
-                try:
-                    stream = loan_sales_team.run(
-                        message,
-                        stream=True,
-                        stream_events=True,
-                        session_id=session_id
-                    )
-                    for event in stream:
-                        asyncio.run_coroutine_threadsafe(queue.put(event), loop)
-                    asyncio.run_coroutine_threadsafe(queue.put(None), loop)  # Sentinel
-                except Exception as e:
-                    asyncio.run_coroutine_threadsafe(queue.put(e), loop)
-            
-            # Start stream in thread
-            import threading
-            thread = threading.Thread(target=run_stream, daemon=True)
-            thread.start()
-            
-            # Consume events from queue asynchronously - yields immediately
-            while True:
-                run_output_event = await queue.get()
-                if run_output_event is None:  # Sentinel
-                    break
-                if isinstance(run_output_event, Exception):
-                    raise run_output_event
+            # Use arun() directly - no threading needed! Members run concurrently
+            # arun() returns an async generator, so we iterate directly without await
+            async for run_output_event in loan_sales_team.arun(
+                message,
+                stream=True,
+                stream_events=True,
+                session_id=session_id
+            ):
                 # Stream content tokens
                 if run_output_event.event == TeamRunEvent.run_content:
                     if hasattr(run_output_event, 'content') and run_output_event.content:
@@ -226,37 +200,14 @@ async def websocket_chat(websocket: WebSocket, session_id: str = "default_sessio
             content_started = False
             
             try:
-                # Use queue to bridge sync generator to async WebSocket
-                queue = asyncio.Queue()
-                loop = asyncio.get_event_loop()
-                
-                def run_stream():
-                    """Run sync stream in thread and put events in queue."""
-                    try:
-                        stream = loan_sales_team.run(
-                            user_message,
-                            stream=True,
-                            stream_events=True,
-                            session_id=session_id
-                        )
-                        for event in stream:
-                            asyncio.run_coroutine_threadsafe(queue.put(event), loop)
-                        asyncio.run_coroutine_threadsafe(queue.put(None), loop)  # Sentinel
-                    except Exception as e:
-                        asyncio.run_coroutine_threadsafe(queue.put(e), loop)
-                
-                # Start stream in thread
-                import threading
-                thread = threading.Thread(target=run_stream, daemon=True)
-                thread.start()
-                
-                # Consume events from queue and send via WebSocket immediately
-                while True:
-                    run_output_event = await queue.get()
-                    if run_output_event is None:  # Sentinel
-                        break
-                    if isinstance(run_output_event, Exception):
-                        raise run_output_event
+                # Use arun() directly - no threading needed! Members run concurrently
+                # arun() returns an async generator, so we iterate directly without await
+                async for run_output_event in loan_sales_team.arun(
+                    user_message,
+                    stream=True,
+                    stream_events=True,
+                    session_id=session_id
+                ):
                     # Stream content tokens in real-time
                     if run_output_event.event == TeamRunEvent.run_content:
                         if hasattr(run_output_event, 'content') and run_output_event.content:
