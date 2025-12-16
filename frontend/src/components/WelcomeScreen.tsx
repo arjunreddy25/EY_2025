@@ -10,7 +10,7 @@ const suggestions = [
   {
     icon: CreditCard,
     title: 'Check my loan eligibility',
-    prompt: 'Hi, I want to check if I am eligible for a personal loan. My customer ID is CUST001.',
+    prompt: 'Hi! I want to check if I am eligible for a personal loan.',
   },
   {
     icon: Calculator,
@@ -20,12 +20,12 @@ const suggestions = [
   {
     icon: FileText,
     title: 'Apply for a loan',
-    prompt: 'I would like to apply for a personal loan. My customer ID is CUST003.',
+    prompt: 'I would like to apply for a personal loan. What is the process?',
   },
   {
     icon: MessageSquare,
     title: 'Know more about offers',
-    prompt: 'What pre-approved loan offers do I have? My customer ID is CUST005.',
+    prompt: 'What pre-approved loan offers do I have?',
   },
 ];
 

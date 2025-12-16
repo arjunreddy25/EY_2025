@@ -1,13 +1,7 @@
 from fastapi import FastAPI, HTTPException
-import json
-import os
+from db_neon import get_customer
 
 app = FastAPI(title="Dummy CRM KYC Server")
-
-# Load customer data once at startup using absolute path
-data_path = os.path.join(os.path.dirname(__file__), "data.json")
-with open(data_path, "r") as f:
-    CUSTOMER_DATA = json.load(f)
 
 
 @app.get("/kyc/{customer_id}")
@@ -16,7 +10,7 @@ def get_kyc_details(customer_id: str):
     Fetch KYC details for verification.
     Only expose required PII fields.
     """
-    customer = CUSTOMER_DATA.get(customer_id)
+    customer = get_customer(customer_id)
 
     if not customer:
         raise HTTPException(status_code=404, detail="Customer not found")

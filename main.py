@@ -9,6 +9,7 @@ from agno.db.sqlite import SqliteDb
 
 from tools import fetch_preapproved_offer, calculate_emi, fetch_kyc_from_crm, fetch_credit_score, validate_loan_eligibility, generate_sanction_letter
 from prompts import SALES_AGENT_PROMPT, VERIFICATION_AGENT_PROMPT, UNDERWRITING_AGENT_PROMPT, SANCTION_AGENT_PROMPT
+from db_neon import get_all_customers
 
 
 load_dotenv()
@@ -38,9 +39,8 @@ db = SqliteDb(
 )
 
 def load_customer_data():
-    data_path = os.path.join(os.path.dirname(__file__), "data.json")
-    with open(data_path, "r") as f:
-        return json.load(f)
+    """Load customer data from NeonDB."""
+    return get_all_customers()
 
 
 CUSTOMER_DATA = load_customer_data()
@@ -96,6 +96,13 @@ loan_sales_team = Team(
         "You OWN the conversation. Customer talks only to you, never directly to worker agents.",
         "Be human-like, persuasive, and polite throughout.",
         "",
+        "CUSTOMER IDENTIFICATION:",
+        "- If the message starts with [SYSTEM CONTEXT: Customer identified...], the customer is already identified.",
+        "- Extract the customer_id from the system context and use it for all tool calls.",
+        "- DO NOT ask for customer ID again - you already have it!",
+        "- Greet them by name if provided in the context.",
+        "- If NO system context is provided, then ask for customer ID.",
+        "",
         "TEAM MEMBERS & ROLES:",
         "1. Sales Agent: Negotiates loan amount, tenure, and calculates EMI.",
         "2. Verification Agent: Verifies customer identity (KYC) from CRM.",
@@ -103,7 +110,7 @@ loan_sales_team = Team(
         "4. Sanction Agent: Generates the final sanction letter PDF.",
         "",
         "CONVERSATION FLOW:",
-        "1. ENGAGE: Greet customer, understand their loan needs, get customer_id",
+        "1. ENGAGE: Greet customer by name (if known), understand their loan needs",
         "2. SALES: Delegate to Sales Agent to discuss loan amount, tenure, and calculate EMI",
         "   - Sales Agent does NOT know pre-approved limit (that comes later in underwriting)",
         "   - Sales Agent takes customer's desired amount and calculates EMI",
@@ -124,13 +131,8 @@ loan_sales_team = Team(
         "- Don't skip steps or re-delegate unnecessarily",
         "- Don't expose agent names or technical systems to customer",
         "- Explain all decisions in plain English",
-        "- STEP 1: Always get customer_id FIRST before anything else.",
-        "- STEP 2: Then delegate to Sales Agent for loan details.",
-        "- STEP 3: After sales, delegate to Verification Agent.",
-        "- STEP 4: After verification, delegate to Underwriting Agent.",
-        "- STEP 5: If approved, delegate to Sanction Agent.",
-        "",
-        "Never skip steps. Customer ID is required before any loan discussion."
+        "- When customer is pre-identified, skip asking for ID and go straight to understanding their loan needs",
+        "- Always pass the customer_id to tools when calling them"
     ],
     db=db,
     add_history_to_context=True,

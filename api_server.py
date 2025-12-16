@@ -23,11 +23,26 @@ from main import loan_sales_team
 class ChatMessage(BaseModel):
     message: str
     session_id: Optional[str] = "default_session"
+    customer_id: Optional[str] = None  # From localStorage after ref link auth
+    customer_name: Optional[str] = None
 
 
 class HealthResponse(BaseModel):
     status: str
     service: str
+
+
+def build_context_message(message: str, customer_id: Optional[str], customer_name: Optional[str]) -> str:
+    """
+    Inject customer context into the message for the agents.
+    This way agents know who they're talking to without asking.
+    """
+    if customer_id and customer_name:
+        return f"[SYSTEM CONTEXT: Customer identified - ID: {customer_id}, Name: {customer_name}. Do NOT ask for customer ID - you already have it. Use this ID for all tool calls.]\n\nCustomer says: {message}"
+    elif customer_id:
+        return f"[SYSTEM CONTEXT: Customer identified - ID: {customer_id}. Do NOT ask for customer ID - you already have it. Use this ID for all tool calls.]\n\nCustomer says: {message}"
+    else:
+        return message
 
 
 @asynccontextmanager
@@ -83,6 +98,25 @@ async def health_check():
     return HealthResponse(status="healthy", service="loan-sales-assistant")
 
 
+@app.get("/auth/verify-ref")
+async def verify_reference_link(ref: str):
+    """
+    Verify reference link from CRM email and return customer identity.
+    Frontend stores this in localStorage for chatbot personalization.
+    """
+    from db_neon import verify_customer_link
+    
+    customer = verify_customer_link(ref)
+    if not customer:
+        raise HTTPException(status_code=401, detail="Invalid or expired link")
+    
+    return {
+        "customer_id": customer["customer_id"],
+        "email": customer["email"],
+        "name": customer["name"]
+    }
+
+
 @app.post("/chat")
 async def chat_endpoint(chat: ChatMessage):
     """
@@ -90,9 +124,14 @@ async def chat_endpoint(chat: ChatMessage):
     For streaming, use WebSocket endpoint /ws/chat or SSE endpoint /chat/stream.
     """
     try:
+        # Build message with customer context
+        contextualized_message = build_context_message(
+            chat.message, chat.customer_id, chat.customer_name
+        )
+        
         # Use arun() directly for async execution
         response = await loan_sales_team.arun(
-            chat.message,
+            contextualized_message,
             stream=False,
             session_id=chat.session_id
         )
@@ -105,11 +144,19 @@ async def chat_endpoint(chat: ChatMessage):
 
 
 @app.get("/chat/stream")
-async def chat_stream_endpoint(message: str, session_id: str = "default_session"):
+async def chat_stream_endpoint(
+    message: str, 
+    session_id: str = "default_session",
+    customer_id: Optional[str] = None,
+    customer_name: Optional[str] = None
+):
     """
     Server-Sent Events (SSE) endpoint for streaming responses.
-    Usage: GET /chat/stream?message=hello&session_id=abc123
+    Usage: GET /chat/stream?message=hello&session_id=abc123&customer_id=CUST001&customer_name=John
     """
+    
+    # Build contextualized message
+    contextualized_message = build_context_message(message, customer_id, customer_name)
     
     async def event_generator():
         try:
@@ -118,7 +165,7 @@ async def chat_stream_endpoint(message: str, session_id: str = "default_session"
             # Use arun() directly - no threading needed! Members run concurrently
             # arun() returns an async generator, so we iterate directly without await
             async for run_output_event in loan_sales_team.arun(
-                message,
+                contextualized_message,
                 stream=True,
                 stream_events=True,
                 session_id=session_id
@@ -182,6 +229,8 @@ async def websocket_chat(websocket: WebSocket, session_id: str = "default_sessio
             data = await websocket.receive_text()
             message_data = json.loads(data)
             user_message = message_data.get("message", "")
+            customer_id = message_data.get("customer_id")
+            customer_name = message_data.get("customer_name")
             
             if not user_message:
                 await websocket.send_json({
@@ -189,6 +238,9 @@ async def websocket_chat(websocket: WebSocket, session_id: str = "default_sessio
                     "message": "Message is required"
                 })
                 continue
+            
+            # Build contextualized message with customer info
+            contextualized_message = build_context_message(user_message, customer_id, customer_name)
             
             # Send acknowledgment
             await websocket.send_json({
@@ -203,7 +255,7 @@ async def websocket_chat(websocket: WebSocket, session_id: str = "default_sessio
                 # Use arun() directly - no threading needed! Members run concurrently
                 # arun() returns an async generator, so we iterate directly without await
                 async for run_output_event in loan_sales_team.arun(
-                    user_message,
+                    contextualized_message,
                     stream=True,
                     stream_events=True,
                     session_id=session_id

@@ -3,15 +3,13 @@ from agno.tools import tool
 import json
 import os
 import requests
-# Load customer data to generate offers
+from db_neon import get_all_customers
+
+# Load customer data from NeonDB
 def load_customer_data():
-    """Load customer data from data.json file."""
-    data_file = os.path.join(os.path.dirname(__file__), "data.json")
-    try:
-        with open(data_file, "r") as f:
-            return json.load(f)
-    except FileNotFoundError:
-        return {}
+    """Load customer data from NeonDB."""
+    return get_all_customers()
+
 
 def calculate_interest_rate(credit_score: int) -> float:
     """

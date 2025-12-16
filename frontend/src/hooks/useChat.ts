@@ -189,8 +189,27 @@ export function useChat(options: UseChatOptions = {}) {
     setMessages(prev => [...prev, userMessage]);
     setIsLoading(true);
 
-    // Send to WebSocket
-    wsRef.current.send(JSON.stringify({ message: content }));
+    // Get customer info from localStorage (set by ref link auth)
+    let customer_id: string | null = null;
+    let customer_name: string | null = null;
+
+    try {
+      const customerStr = localStorage.getItem('customer');
+      if (customerStr) {
+        const customer = JSON.parse(customerStr);
+        customer_id = customer.customer_id;
+        customer_name = customer.name;
+      }
+    } catch (e) {
+      console.warn('Could not parse customer from localStorage:', e);
+    }
+
+    // Send to WebSocket with customer context
+    wsRef.current.send(JSON.stringify({
+      message: content,
+      customer_id,
+      customer_name
+    }));
   }, [connect]);
 
   // Create new session

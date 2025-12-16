@@ -8,12 +8,25 @@ import { useTheme } from '@/hooks/useTheme';
 
 interface User {
   email: string;
+  name?: string;
+  customer_id?: string;
 }
 
 export function ChatLayout() {
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [user, setUser] = useState<User | null>(() => {
-    // Check localStorage for existing session
+    // Check for customer from ref link first (set by App.tsx)
+    const customer = localStorage.getItem('customer');
+    if (customer) {
+      const customerData = JSON.parse(customer);
+      return {
+        email: customerData.email,
+        name: customerData.name,
+        customer_id: customerData.customer_id
+      };
+    }
+
+    // Fallback to user storage
     const savedUser = localStorage.getItem('user');
     return savedUser ? JSON.parse(savedUser) : null;
   });
@@ -53,6 +66,7 @@ export function ChatLayout() {
   const handleLogout = useCallback(() => {
     setUser(null);
     localStorage.removeItem('user');
+    localStorage.removeItem('customer');
   }, []);
 
   // Show login page if not authenticated

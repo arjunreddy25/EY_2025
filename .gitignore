@@ -55,3 +55,8 @@ Thumbs.db
 *.log
 logs/
 *.tmp
+
+# --- Migration & Seeding ---
+migrate_to_neon.py
+seed_data.py
+
