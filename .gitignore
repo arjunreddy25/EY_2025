@@ -1,9 +1,4 @@
-# Environment variables
-.env
-.env.local
-.env.*.local
-
-# Python
+# --- Python ---
 __pycache__/
 *.py[cod]
 *$py.class
@@ -15,7 +10,7 @@ dist/
 downloads/
 eggs/
 .eggs/
-
+# lib/  <-- Commented out to prevent blocking frontend/src/lib
 lib64/
 parts/
 sdist/
@@ -24,40 +19,39 @@ wheels/
 *.egg-info/
 .installed.cfg
 *.egg
+MANIFEST
 
-# Virtual environments
+# Virtual Environments (Python)
 .venv/
 venv/
 ENV/
 env/
+.env
 multiagent/
 
-# Database files
-*.db
-*.sqlite
-*.sqlite3
+# --- Node.js / Frontend ---
+node_modules/
+frontend/dist/
+frontend/.vite/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+.npm/
 
-# IDE
-.vscode/
+# --- IDEs / Editors ---
 .idea/
+.vscode/
 *.swp
 *.swo
-*~
-
-# OS
 .DS_Store
-.DS_Store?
-._*
-.Spotlight-V100
-.Trashes
-ehthumbs.db
 Thumbs.db
 
-# Logs
+# --- Database ---
+*.db
+*.sqlite3
+
+# --- Custom / Logs ---
 *.log
 logs/
-
-# Temporary files
 *.tmp
-*.temp
-
