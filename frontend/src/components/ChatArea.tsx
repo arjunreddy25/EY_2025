@@ -1,5 +1,4 @@
 import { useRef, useEffect } from 'react';
-import { ScrollArea } from '@/components/ui/scroll-area';
 import { MessageBubble, MessageListSkeleton } from './MessageBubble';
 import { TypingIndicator } from './TypingIndicator';
 import { WelcomeScreen } from './WelcomeScreen';
@@ -18,12 +17,14 @@ export function ChatArea({
   currentToolCall,
   onSuggestionClick 
 }: ChatAreaProps) {
-  const scrollRef = useRef<HTMLDivElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
 
   // Auto-scroll to bottom on new messages
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+    if (bottomRef.current) {
+      bottomRef.current.scrollIntoView({ behavior: 'smooth' });
+    }
   }, [messages, isLoading]);
 
   if (messages.length === 0 && !isLoading) {
@@ -31,7 +32,10 @@ export function ChatArea({
   }
 
   return (
-    <ScrollArea className="flex-1" ref={scrollRef}>
+    <div
+      ref={containerRef}
+      className="flex-1 overflow-y-auto"
+    >
       <div className="mx-auto max-w-3xl pb-4">
         {messages.length === 0 && isLoading ? (
           <MessageListSkeleton />
@@ -46,8 +50,8 @@ export function ChatArea({
             )}
           </>
         )}
-        <div ref={bottomRef} />
+        <div ref={bottomRef} className="h-4" />
       </div>
-    </ScrollArea>
+    </div>
   );
 }
