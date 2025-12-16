@@ -28,3 +28,8 @@ def get_kyc_details(customer_id: str):
         "address": customer["address"],
         "kyc_verified": True
     }
+
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8001)
