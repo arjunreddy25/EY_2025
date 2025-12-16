@@ -1,13 +1,7 @@
-
+import { ChatLayout } from './components/ChatLayout';
 
 function App() {
-
-
-  return (
-    <>
-      <h1 className="text-3xl font-bold underline">hello</h1>
-    </>
-  )
+  return <ChatLayout />;
 }
 
-export default App
+export default App;
