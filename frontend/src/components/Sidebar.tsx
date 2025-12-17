@@ -53,7 +53,7 @@ export function Sidebar({
     <TooltipProvider>
       <div
         className={cn(
-          "flex h-full flex-col border-r bg-sidebar text-sidebar-foreground transition-all duration-300",
+          "flex h-full flex-col overflow-hidden border-r bg-sidebar text-sidebar-foreground transition-all duration-300",
           isOpen ? "w-72" : "w-16"
         )}
       >
@@ -114,7 +114,7 @@ export function Sidebar({
         </div>
 
         {/* Chat History */}
-        <ScrollArea className="flex-1">
+        <ScrollArea className="flex-1 min-h-0">
           <div className="px-3">
             {/* Skeleton Loading */}
             {isOpen && isLoadingSessions && (
@@ -188,7 +188,7 @@ export function Sidebar({
         <Separator />
 
         {/* Bottom Section */}
-        <div className="p-3 space-y-1">
+        <div className="shrink-0 p-3 space-y-1">
           {/* Help */}
           <Tooltip>
             <TooltipTrigger asChild>
