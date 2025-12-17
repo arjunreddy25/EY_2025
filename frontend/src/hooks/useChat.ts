@@ -273,7 +273,37 @@ export function useChat(options: UseChatOptions = {}) {
         return;
       }
 
-      const messageContent = file ? `${content}\n\n[Attached: ${file.name}]` : content;
+      let messageContent = content;
+
+      // Upload file if provided - backend processes with VLM immediately
+      if (file) {
+        try {
+          const formData = new FormData();
+          formData.append('file', file);
+
+          const uploadResponse = await fetch('http://localhost:8000/upload/salary-slip', {
+            method: 'POST',
+            body: formData,
+          });
+
+          if (uploadResponse.ok) {
+            const uploadData = await uploadResponse.json();
+            // Backend already processed with VLM - send extracted data to agent
+            const extracted = uploadData.extracted;
+            if (extracted?.status === 'success') {
+              messageContent = `${content}\n\n[SALARY SLIP VERIFIED: Net Salary = ₹${extracted.net_salary?.toLocaleString() || 'Unknown'}, Employer = ${extracted.employer || 'Unknown'}, Period = ${extracted.pay_period || 'Unknown'}]`;
+            } else {
+              messageContent = `${content}\n\n[Salary slip processing failed: ${extracted?.message || 'Unknown error'}]`;
+            }
+          } else {
+            messageContent = `${content}\n\n[Attached: ${file.name} - upload failed]`;
+          }
+        } catch (error) {
+          console.error('File upload error:', error);
+          messageContent = `${content}\n\n[Attached: ${file.name} - upload failed]`;
+        }
+      }
+
       const isFirstMessage = messages.length === 0;
 
       // Auto-create session if this is the first message
@@ -288,18 +318,19 @@ export function useChat(options: UseChatOptions = {}) {
         }
       }
 
-      // Add user message to UI
+      // Add user message to UI (show clean version without system context)
+      const displayContent = file ? `${content}\n\n📎 Attached: ${file.name}` : content;
       const userMessage: Message = {
         id: `msg_${Date.now()}`,
         role: 'user',
-        content: messageContent,
+        content: displayContent,
         timestamp: new Date(),
       };
 
       setMessages((prev) => [...prev, userMessage]);
       setIsLoading(true);
 
-      // Save user message
+      // Save user message (full content with system context)
       saveMessage('user', messageContent);
 
       // Generate AI title for first message
@@ -310,11 +341,11 @@ export function useChat(options: UseChatOptions = {}) {
         });
       }
 
-      // Get customer info and send to WebSocket
+      // Get customer info and send to WebSocket (send full message with file path)
       const customer = getCustomerInfo();
       wsRef.current.send(
         JSON.stringify({
-          message: content,
+          message: messageContent,
           customer_id: customer?.customer_id || null,
           customer_name: customer?.name || null,
         })

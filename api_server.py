@@ -9,6 +9,10 @@ import json
 import os
 import smtplib
 import traceback
+# Ensure uploads directory exists
+import pathlib
+import shutil
+
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from contextlib import asynccontextmanager
@@ -16,9 +20,10 @@ from typing import Optional, List
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, File, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse, FileResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from groq import Groq
 
@@ -52,6 +57,9 @@ SMTP_PORT = int(os.getenv("SMTP_PORT", 587))
 SMTP_EMAIL = os.getenv("SMTP_EMAIL")
 APP_PASSWORD = os.getenv("APP_PASSWORD")
 FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:5173")
+UPLOADS_DIR = pathlib.Path(__file__).parent.resolve() / "uploads"
+UPLOADS_DIR.mkdir(exist_ok=True)
+
 
 
 
@@ -242,6 +250,56 @@ manager = ConnectionManager()
 async def health_check():
     """Health check endpoint."""
     return HealthResponse(status="healthy", service="loan-sales-assistant")
+
+
+# ============================================
+# Salary Slip Upload Endpoint
+# ============================================
+
+from tools import extract_salary_from_slip
+
+
+@app.post("/upload/salary-slip")
+async def upload_salary_slip(file: UploadFile = File(...)):
+    """
+    Upload a salary slip (PDF or image) for verification.
+    Immediately processes with VLM and returns extracted salary data.
+    """
+    # Validate file type - Groq Vision only supports images, not PDFs
+    allowed_types = {".png", ".jpg", ".jpeg", ".webp"}
+    suffix = pathlib.Path(file.filename).suffix.lower()
+    if suffix not in allowed_types:
+        raise HTTPException(
+            status_code=400, 
+            detail=f"Unsupported file type. Allowed: {', '.join(allowed_types)}"
+        )
+    
+    # Generate unique filename
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    safe_filename = f"salary_slip_{timestamp}{suffix}"
+    file_path = UPLOADS_DIR / safe_filename
+    
+    # Save file locally
+    try:
+        with open(file_path, "wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
+    finally:
+        file.file.close()
+    
+    print(f"📤 Salary slip uploaded: {file_path}")
+    
+    # IMMEDIATELY process with VLM to extract salary data
+    import json
+    extraction_result = extract_salary_from_slip(str(file_path))
+    extracted_data = json.loads(extraction_result)
+    
+    print(f"🔍 VLM extraction result: {extracted_data}")
+    
+    return {
+        "status": "processed",
+        "filename": safe_filename,
+        "extracted": extracted_data
+    }
 
 
 @app.get("/sanction-letters/{filename}")
@@ -879,6 +937,11 @@ async def websocket_chat(websocket: WebSocket, session_id: str = "default_sessio
         manager.disconnect(session_id)
         raise
 
+
+
+
+# Mount uploads folder for static file serving (at end to avoid route conflicts)
+app.mount("/uploads", StaticFiles(directory=str(UPLOADS_DIR)), name="uploads")
 
 if __name__ == "__main__":
     import uvicorn

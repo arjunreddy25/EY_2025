@@ -108,6 +108,7 @@ loan_sales_team = Team(
         "- DO NOT ask for customer ID again - you already have it!",
         "- Greet them by name if provided in the context.",
         "- If NO system context is provided, then ask for customer ID.",
+        "- If the message contains [SYSTEM: User uploaded salary slip...], delegate to Underwriting Agent immediately.",
         "",
         "TEAM MEMBERS & ROLES:",
         "1. Sales Agent: Negotiates loan amount, tenure, and calculates EMI.",

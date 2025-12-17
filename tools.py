@@ -3,6 +3,8 @@ from agno.tools import tool
 import json
 import os
 import requests
+import base64
+from pathlib import Path
 from datetime import datetime
 from db_neon import get_all_customers, create_loan_application
 from io import BytesIO
@@ -13,6 +15,138 @@ from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
 from reportlab.lib import colors
 from s3_utils import upload_file_to_s3
+
+# Groq VLM for salary slip extraction
+from groq import Groq
+from dotenv import load_dotenv
+load_dotenv()
+
+GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+
+def extract_salary_from_slip(file_path: str) -> str:
+    """
+    Extract salary details from an uploaded salary slip (PDF or image).
+    Uses Groq Vision (Llama 4 Scout) to read and parse the document.
+    Returns extracted net salary, employer name, and pay period.
+    """
+    file_path = Path(file_path)
+    
+    # For local paths, check if file exists
+    if not file_path.exists():
+        # Try looking in uploads directory
+        uploads_dir = Path(__file__).parent / "uploads"
+        possible_path = uploads_dir / file_path.name
+        if possible_path.exists():
+            file_path = possible_path
+        else:
+            return json.dumps({
+                "status": "error",
+                "message": f"File not found: {file_path}"
+            })
+    
+    # Read and encode file content
+    try:
+        with open(file_path, "rb") as f:
+            file_bytes = f.read()
+        base64_image = base64.b64encode(file_bytes).decode('utf-8')
+    except Exception as e:
+        return json.dumps({
+            "status": "error",
+            "message": f"Failed to read file: {str(e)}"
+        })
+    
+    # Determine MIME type
+    suffix = file_path.suffix.lower()
+    mime_types = {
+        ".png": "image/png",
+        ".jpg": "image/jpeg",
+        ".jpeg": "image/jpeg",
+        ".webp": "image/webp"
+    }
+    mime_type = mime_types.get(suffix, "image/jpeg")
+    
+    # Note: Groq Vision doesn't support PDFs directly, only images
+    if suffix == ".pdf":
+        return json.dumps({
+            "status": "error",
+            "message": "PDF files not supported. Please upload an image (PNG, JPG, JPEG)."
+        })
+    
+    # Use Groq Vision API
+    try:
+        client = Groq(api_key=GROQ_API_KEY)
+        
+        prompt = """Analyze this salary slip document and extract the following information.
+Return ONLY a valid JSON object with these exact keys:
+{
+    "employer": "Company name",
+    "net_salary": 12345,
+    "pay_period": "Month Year",
+    "gross_salary": 12345,
+    "deductions": 1234
+}
+
+Rules:
+- net_salary and gross_salary must be numbers (no currency symbols or commas)
+- If you cannot find a value, use null
+- Extract the NET/TAKE-HOME salary amount, not gross
+- pay_period should be like "December 2024" or "Nov 2024"
+"""
+        
+        response = client.chat.completions.create(
+            model="meta-llama/llama-4-scout-17b-16e-instruct",
+            messages=[
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": prompt},
+                        {
+                            "type": "image_url",
+                            "image_url": {
+                                "url": f"data:{mime_type};base64,{base64_image}"
+                            }
+                        }
+                    ]
+                }
+            ],
+            temperature=0.3,
+            max_completion_tokens=1024
+        )
+        
+        # Parse the response
+        response_text = response.choices[0].message.content.strip()
+        
+        # Remove markdown code blocks if present
+        if response_text.startswith("```"):
+            response_text = response_text.split("```")[1]
+            if response_text.startswith("json"):
+                response_text = response_text[4:]
+        response_text = response_text.strip()
+        
+        extracted = json.loads(response_text)
+        
+        return json.dumps({
+            "status": "success",
+            "mode": "groq",
+            "employer": extracted.get("employer"),
+            "net_salary": extracted.get("net_salary"),
+            "pay_period": extracted.get("pay_period"),
+            "gross_salary": extracted.get("gross_salary"),
+            "deductions": extracted.get("deductions")
+        })
+        
+    except json.JSONDecodeError as e:
+        return json.dumps({
+            "status": "error",
+            "message": f"Failed to parse response as JSON: {str(e)}",
+            "raw_response": response_text[:500] if 'response_text' in dir() else None
+        })
+    except Exception as e:
+        return json.dumps({
+            "status": "error",
+            "message": f"Groq API error: {str(e)}"
+        })
+
 
 # Load customer data from NeonDB
 def load_customer_data():

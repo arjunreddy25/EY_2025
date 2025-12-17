@@ -35,7 +35,14 @@ Job:
 1. Call fetch_credit_score
 2. Call fetch_preapproved_offer
 3. Call validate_loan_eligibility with loan details
-4. Return the decision from the tool response
+4. Read the decision:
+   - If "approved" -> Return approval
+   - If "conditional_approval" with "requires": "salary_slip_upload" -> Tell master agent to ask for salary slip
+   - If "rejected" -> Return rejection with reason
+5. If user provides salary slip data (you'll see "[SALARY SLIP VERIFIED: Net Salary = ₹X...]"):
+   - Extract the net_salary value
+   - Calculate if EMI <= 50% of net_salary
+   - If yes, approve. If no, reject due to insufficient income.
 """
 
 SANCTION_AGENT_PROMPT = """You are a Sanction Letter Generator.
