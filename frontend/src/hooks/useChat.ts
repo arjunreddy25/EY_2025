@@ -1,6 +1,19 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+/**
+ * useChat hook - Refactored to use React Query for data fetching.
+ * Keeps WebSocket logic for real-time streaming.
+ */
 
-const API_BASE = 'http://localhost:8000';
+import { useState, useEffect, useCallback, useRef } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
+import {
+  useSessions,
+  useSession,
+  useCreateSession,
+  useDeleteSession,
+  useSaveMessage,
+  useGenerateTitle,
+  chatKeys,
+} from './useChatQueries';
 
 export interface Message {
   id: string;
@@ -34,47 +47,45 @@ interface UseChatOptions {
   onNavigate?: (path: string) => void;
 }
 
-// Helper to get/set anonymous session IDs in localStorage
-function getStoredSessionIds(): string[] {
-  try {
-    const ids = localStorage.getItem('chat_session_ids');
-    return ids ? JSON.parse(ids) : [];
-  } catch {
-    return [];
-  }
-}
-
-function addStoredSessionId(sessionId: string): void {
-  const ids = getStoredSessionIds();
-  if (!ids.includes(sessionId)) {
-    ids.unshift(sessionId);
-    localStorage.setItem('chat_session_ids', JSON.stringify(ids.slice(0, 50)));
-  }
-}
-
-function removeStoredSessionId(sessionId: string): void {
-  const ids = getStoredSessionIds().filter(id => id !== sessionId);
-  localStorage.setItem('chat_session_ids', JSON.stringify(ids));
-}
-
 export function useChat(options: UseChatOptions = {}) {
-  const { 
+  const {
     wsUrl = 'ws://localhost:8000/ws/chat',
     initialSessionId,
-    onNavigate
+    onNavigate,
   } = options;
 
+  // Local state for real-time messaging
   const [messages, setMessages] = useState<Message[]>([]);
   const [isConnected, setIsConnected] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
-  const [isLoadingSessions, setIsLoadingSessions] = useState(true);
   const [currentToolCall, setCurrentToolCall] = useState<string | null>(null);
-  const [sessions, setSessions] = useState<ChatSession[]>([]);
-  const [currentSessionId, setCurrentSessionId] = useState(initialSessionId || `session_${Date.now()}`);
-  
+  const [currentSessionId, setCurrentSessionId] = useState(
+    initialSessionId || `session_${Date.now()}`
+  );
+
+  // Refs
   const wsRef = useRef<WebSocket | null>(null);
   const currentMessageRef = useRef<string>('');
   const pendingAssistantMessageRef = useRef<string>('');
+  const currentSessionIdRef = useRef(currentSessionId);
+
+  // Keep ref in sync
+  useEffect(() => {
+    currentSessionIdRef.current = currentSessionId;
+  }, [currentSessionId]);
+
+  // React Query hooks
+  const queryClient = useQueryClient();
+  const { data: sessions = [], isLoading: isLoadingSessions } = useSessions();
+
+  // Only fetch session if it exists in sessions list (prevents 404 for new sessions)
+  const sessionExists = sessions.some((s) => s.id === currentSessionId);
+  const { data: sessionData } = useSession(sessionExists ? currentSessionId : null);
+
+  const createSessionMutation = useCreateSession();
+  const deleteSessionMutation = useDeleteSession();
+  const saveMessageMutation = useSaveMessage();
+  const generateTitleMutation = useGenerateTitle();
 
   // Get customer info from localStorage
   const getCustomerInfo = useCallback(() => {
@@ -89,174 +100,52 @@ export function useChat(options: UseChatOptions = {}) {
     return null;
   }, []);
 
-  // Fetch sessions from API
-  const fetchSessions = useCallback(async () => {
-    setIsLoadingSessions(true);
-    try {
-      const customer = getCustomerInfo();
-
-      if (customer?.customer_id) {
-        // Logged-in user: fetch by customer_id
-        const res = await fetch(`${API_BASE}/chat/sessions?customer_id=${customer.customer_id}`);
-        if (res.ok) {
-          const data = await res.json();
-          setSessions(data.map((s: any) => ({
-            id: s.session_id,
-            title: s.title || 'New Chat',
-            createdAt: new Date(s.created_at),
-            updatedAt: s.updated_at ? new Date(s.updated_at) : undefined,
-            messageCount: s.message_count,
-            lastMessagePreview: s.last_message_preview
-          })));
-        }
-      } else {
-        // Anonymous user: fetch by stored session IDs
-        const storedIds = getStoredSessionIds();
-        if (storedIds.length > 0) {
-          const res = await fetch(`${API_BASE}/chat/sessions/by-ids`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ session_ids: storedIds })
-          });
-          if (res.ok) {
-            const data = await res.json();
-            setSessions(data.map((s: any) => ({
-              id: s.session_id,
-              title: s.title || 'New Chat',
-              createdAt: new Date(s.created_at),
-              updatedAt: s.updated_at ? new Date(s.updated_at) : undefined,
-              messageCount: s.message_count,
-              lastMessagePreview: s.last_message_preview
-            })));
-          }
-        } else {
-          setSessions([]);
-        }
-      }
-    } catch (e) {
-      console.error('Error fetching sessions:', e);
-    } finally {
-      setIsLoadingSessions(false);
+  // Load session messages when sessionData changes (only if we have messages and current is empty)
+  useEffect(() => {
+    if (sessionData?.messages && sessionData.messages.length > 0 && messages.length === 0) {
+      setMessages(sessionData.messages);
     }
-  }, [getCustomerInfo]);
+  }, [sessionData, messages.length]);
 
-  // Save message to API and update local state optimistically
-  const saveMessageToAPI = useCallback(async (sessionId: string, role: string, content: string, toolCalls?: ToolCall[]) => {
-    try {
-      const response = await fetch(`${API_BASE}/chat/sessions/${sessionId}/messages`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ role, content, tool_calls: toolCalls })
+  // Save message helper using ref to avoid stale closures
+  const saveMessage = useCallback(
+    (role: 'user' | 'assistant', content: string, toolCalls?: ToolCall[]) => {
+      saveMessageMutation.mutate({
+        sessionId: currentSessionIdRef.current,
+        role,
+        content,
+        toolCalls: toolCalls?.map((tc) => ({
+          tool: tc.tool,
+          agent: tc.agent,
+          status: tc.status,
+          result: tc.result,
+        })),
       });
-
-      if (response.ok && role === 'user') {
-        // Update local session title optimistically for first user message
-        setSessions(prev => {
-          const session = prev.find(s => s.id === sessionId);
-          if (session && (session.title === 'New Chat' || !session.title)) {
-            // Use first 40 chars of message as title (will be replaced by AI title later)
-            const newTitle = content.length > 40 ? content.slice(0, 40) + '...' : content;
-            return prev.map(s =>
-              s.id === sessionId
-                ? { ...s, title: newTitle, lastMessagePreview: content }
-                : s
-            );
-          }
-          return prev;
-        });
-
-        // Request AI-generated title (non-blocking)
-        fetch(`${API_BASE}/chat/sessions/${sessionId}/generate-title`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ message: content })
-        }).then(async res => {
-          if (res.ok) {
-            const data = await res.json();
-            if (data.title) {
-              setSessions(prev => prev.map(s =>
-                s.id === sessionId ? { ...s, title: data.title } : s
-              ));
-            }
-          }
-        }).catch(() => { }); // Ignore errors, title already set to truncated message
-      }
-    } catch (e) {
-      console.error('Error saving message:', e);
-    }
-  }, []);
-
-  // Create session in API
-  const createSessionInAPI = useCallback(async (sessionId: string, title: string = 'New Chat') => {
-    try {
-      const customer = getCustomerInfo();
-      await fetch(`${API_BASE}/chat/sessions`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          session_id: sessionId,
-          customer_id: customer?.customer_id || null,
-          title
-        })
-      });
-      // Track in localStorage for anonymous users
-      addStoredSessionId(sessionId);
-    } catch (e) {
-      console.error('Error creating session:', e);
-    }
-  }, [getCustomerInfo]);
-
-  // Load session messages from API
-  const loadSessionMessages = useCallback(async (sessionId: string) => {
-    try {
-      const res = await fetch(`${API_BASE}/chat/sessions/${sessionId}`);
-      if (res.ok) {
-        const data = await res.json();
-        const loadedMessages: Message[] = (data.messages || []).map((m: any) => ({
-          id: `msg_${m.id}`,
-          role: m.role,
-          content: m.content,
-          timestamp: new Date(m.created_at),
-          toolCalls: m.tool_calls || []
-        }));
-        setMessages(loadedMessages);
-        return loadedMessages;
-      }
-    } catch (e) {
-      console.error('Error loading session messages:', e);
-    }
-    return [];
-  }, []);
+    },
+    [saveMessageMutation]
+  );
 
   // Connect to WebSocket
   const connect = useCallback(() => {
     if (wsRef.current?.readyState === WebSocket.OPEN) return;
 
-    const ws = new WebSocket(`${wsUrl}?session_id=${currentSessionId}`);
-    
-    ws.onopen = () => {
-      setIsConnected(true);
-    };
+    const ws = new WebSocket(`${wsUrl}?session_id=${currentSessionIdRef.current}`);
 
-    ws.onclose = () => {
-      setIsConnected(false);
-    };
-
-    ws.onerror = () => {
-      setIsConnected(false);
-    };
+    ws.onopen = () => setIsConnected(true);
+    ws.onclose = () => setIsConnected(false);
+    ws.onerror = () => setIsConnected(false);
 
     ws.onmessage = (event) => {
       const data = JSON.parse(event.data);
-      
+
       switch (data.type) {
         case 'ack':
           break;
-          
+
         case 'content_start':
           currentMessageRef.current = '';
           pendingAssistantMessageRef.current = '';
-          setMessages(prev => [
+          setMessages((prev) => [
             ...prev,
             {
               id: `msg_${Date.now()}`,
@@ -264,15 +153,15 @@ export function useChat(options: UseChatOptions = {}) {
               content: '',
               timestamp: new Date(),
               isStreaming: true,
-              toolCalls: []
-            }
+              toolCalls: [],
+            },
           ]);
           break;
-          
+
         case 'content':
           currentMessageRef.current += data.data;
           pendingAssistantMessageRef.current = currentMessageRef.current;
-          setMessages(prev => {
+          setMessages((prev) => {
             const updated = [...prev];
             const lastMsg = updated[updated.length - 1];
             if (lastMsg?.role === 'assistant') {
@@ -281,32 +170,32 @@ export function useChat(options: UseChatOptions = {}) {
             return updated;
           });
           break;
-          
+
         case 'tool_start':
         case 'member_tool_start':
           setCurrentToolCall(data.tool);
-          setMessages(prev => {
+          setMessages((prev) => {
             const updated = [...prev];
             const lastMsg = updated[updated.length - 1];
             if (lastMsg?.role === 'assistant') {
               lastMsg.toolCalls = [
                 ...(lastMsg.toolCalls || []),
-                { tool: data.tool, agent: data.agent, status: 'started' }
+                { tool: data.tool, agent: data.agent, status: 'started' },
               ];
             }
             return updated;
           });
           break;
-          
+
         case 'tool_complete':
         case 'member_tool_complete':
           setCurrentToolCall(null);
-          setMessages(prev => {
+          setMessages((prev) => {
             const updated = [...prev];
             const lastMsg = updated[updated.length - 1];
             if (lastMsg?.role === 'assistant' && lastMsg.toolCalls) {
               const toolCall = lastMsg.toolCalls.find(
-                tc => tc.tool === data.tool && tc.status === 'started'
+                (tc) => tc.tool === data.tool && tc.status === 'started'
               );
               if (toolCall) {
                 toolCall.status = 'completed';
@@ -316,41 +205,41 @@ export function useChat(options: UseChatOptions = {}) {
             return updated;
           });
           break;
-          
+
         case 'done':
           setIsLoading(false);
-          setMessages(prev => {
+          setMessages((prev) => {
             const updated = [...prev];
             const lastMsg = updated[updated.length - 1];
             if (lastMsg?.role === 'assistant') {
               lastMsg.isStreaming = false;
-              // Save assistant message to API
+              // Save assistant message
               if (pendingAssistantMessageRef.current) {
-                saveMessageToAPI(currentSessionId, 'assistant', pendingAssistantMessageRef.current, lastMsg.toolCalls);
+                saveMessage('assistant', pendingAssistantMessageRef.current, lastMsg.toolCalls);
                 pendingAssistantMessageRef.current = '';
               }
             }
             return updated;
           });
           break;
-          
+
         case 'error':
           setIsLoading(false);
-          setMessages(prev => [
+          setMessages((prev) => [
             ...prev,
             {
               id: `msg_${Date.now()}`,
               role: 'assistant',
               content: `Error: ${data.message}`,
-              timestamp: new Date()
-            }
+              timestamp: new Date(),
+            },
           ]);
           break;
       }
     };
 
     wsRef.current = ws;
-  }, [wsUrl, currentSessionId, saveMessageToAPI]);
+  }, [wsUrl, saveMessage]);
 
   // Disconnect from WebSocket
   const disconnect = useCallback(() => {
@@ -361,121 +250,136 @@ export function useChat(options: UseChatOptions = {}) {
   }, []);
 
   // Send a message
-  const sendMessage = useCallback(async (content: string, file?: File) => {
-    if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
-      connect();
-      setTimeout(() => sendMessage(content, file), 500);
-      return;
-    }
-
-    const messageContent = file ? `${content}\n\n[Attached: ${file.name}]` : content;
-
-    // Auto-create session if this is the first message (messages is empty)
-    const isFirstMessage = messages.length === 0;
-    if (isFirstMessage) {
-      // Check if session exists in our local sessions list
-      const sessionExists = sessions.some(s => s.id === currentSessionId);
-      if (!sessionExists) {
-        // Create session in API first
-        await createSessionInAPI(currentSessionId, 'New Chat');
-        // Update local sessions list
-        setSessions(prev => [{
-          id: currentSessionId,
-          title: 'New Chat',
-          createdAt: new Date(),
-          messageCount: 0
-        }, ...prev]);
-        // Navigate to the new session URL
-        onNavigate?.(`/chat/${currentSessionId}`);
+  const sendMessage = useCallback(
+    async (content: string, file?: File) => {
+      if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
+        connect();
+        setTimeout(() => sendMessage(content, file), 500);
+        return;
       }
-    }
 
-    // Add user message to UI
-    const userMessage: Message = {
-      id: `msg_${Date.now()}`,
-      role: 'user',
-      content: messageContent,
-      timestamp: new Date()
-    };
-    
-    setMessages(prev => [...prev, userMessage]);
-    setIsLoading(true);
+      const messageContent = file ? `${content}\n\n[Attached: ${file.name}]` : content;
+      const isFirstMessage = messages.length === 0;
 
-    // Save user message to API
-    await saveMessageToAPI(currentSessionId, 'user', messageContent);
+      // Auto-create session if this is the first message
+      if (isFirstMessage) {
+        const sessionExists = sessions.some((s) => s.id === currentSessionId);
+        if (!sessionExists) {
+          await createSessionMutation.mutateAsync({
+            sessionId: currentSessionId,
+            title: 'New Chat',
+          });
+          onNavigate?.(`/chat/${currentSessionId}`);
+        }
+      }
 
-    // Get customer info
-    const customer = getCustomerInfo();
+      // Add user message to UI
+      const userMessage: Message = {
+        id: `msg_${Date.now()}`,
+        role: 'user',
+        content: messageContent,
+        timestamp: new Date(),
+      };
 
-    // Send to WebSocket
-    wsRef.current.send(JSON.stringify({
-      message: content,
-      customer_id: customer?.customer_id || null,
-      customer_name: customer?.name || null
-    }));
-  }, [connect, currentSessionId, saveMessageToAPI, getCustomerInfo, messages.length, sessions, createSessionInAPI, onNavigate]);
+      setMessages((prev) => [...prev, userMessage]);
+      setIsLoading(true);
 
-  // Create new session - just resets state, actual session is created on first message
-  const newSession = useCallback(async () => {
+      // Save user message
+      saveMessage('user', messageContent);
+
+      // Generate AI title for first message
+      if (isFirstMessage) {
+        generateTitleMutation.mutate({
+          sessionId: currentSessionId,
+          message: content,
+        });
+      }
+
+      // Get customer info and send to WebSocket
+      const customer = getCustomerInfo();
+      wsRef.current.send(
+        JSON.stringify({
+          message: content,
+          customer_id: customer?.customer_id || null,
+          customer_name: customer?.name || null,
+        })
+      );
+    },
+    [
+      connect,
+      currentSessionId,
+      messages.length,
+      sessions,
+      createSessionMutation,
+      saveMessage,
+      generateTitleMutation,
+      getCustomerInfo,
+      onNavigate,
+    ]
+  );
+
+  // Create new session (just resets state)
+  const newSession = useCallback(() => {
     const newId = `session_${Date.now()}`;
-
-    // Just update state - don't create in API yet (will be created on first message)
     setCurrentSessionId(newId);
     setMessages([]);
     disconnect();
-
-    // Navigate to new session URL (will show welcome screen since no messages)
     onNavigate?.(`/chat/${newId}`);
-
     return newId;
   }, [disconnect, onNavigate]);
 
   // Load a session
-  const loadSession = useCallback(async (session: ChatSession) => {
-    disconnect();
-    setCurrentSessionId(session.id);
+  const loadSession = useCallback(
+    (session: ChatSession) => {
+      disconnect();
+      setCurrentSessionId(session.id);
+      setMessages([]); // Clear messages so they load from query
+      onNavigate?.(`/chat/${session.id}`);
+    },
+    [disconnect, onNavigate]
+  );
 
-    // Navigate to session URL
-    onNavigate?.(`/chat/${session.id}`);
+  // Delete a session with redirect
+  const deleteSession = useCallback(
+    (sessionId: string) => {
+      deleteSessionMutation.mutate(sessionId, {
+        onSuccess: () => {
+          // If deleting current session, navigate to welcome screen
+          if (sessionId === currentSessionId) {
+            const newId = `session_${Date.now()}`;
+            setCurrentSessionId(newId);
+            setMessages([]);
+            disconnect();
+            onNavigate?.(`/chat`);
+          }
+        },
+      });
+    },
+    [currentSessionId, deleteSessionMutation, disconnect, onNavigate]
+  );
 
-    await loadSessionMessages(session.id);
-  }, [disconnect, loadSessionMessages, onNavigate]);
-
-  // Delete a session
-  const deleteSession = useCallback(async (sessionId: string) => {
-    try {
-      await fetch(`${API_BASE}/chat/sessions/${sessionId}`, { method: 'DELETE' });
-      removeStoredSessionId(sessionId);
-
-      // If deleting current session, create new one
-      if (sessionId === currentSessionId) {
-        await newSession();
-      } else {
-        await fetchSessions();
-      }
-    } catch (e) {
-      console.error('Error deleting session:', e);
-    }
-  }, [currentSessionId, newSession, fetchSessions]);
+  // Refetch sessions
+  const refetchSessions = useCallback(() => {
+    queryClient.invalidateQueries({ queryKey: chatKeys.sessions() });
+  }, [queryClient]);
 
   // Load initial session if provided
   useEffect(() => {
     if (initialSessionId) {
-      loadSessionMessages(initialSessionId);
       setCurrentSessionId(initialSessionId);
     }
-  }, [initialSessionId, loadSessionMessages]);
+  }, [initialSessionId]);
 
-  // Fetch sessions on mount
+  // Auto-connect on mount and session change
   useEffect(() => {
-    fetchSessions();
-  }, [fetchSessions]);
-
-  // Auto-connect on session change
-  useEffect(() => {
-    connect();
-    return () => disconnect();
-  }, [connect, disconnect]);
+    const timeoutId = setTimeout(() => {
+      connect();
+    }, 100);
+    return () => {
+      clearTimeout(timeoutId);
+      disconnect();
+    };
+  }, [currentSessionId]); // Only depend on sessionId, not on connect/disconnect
 
   return {
     messages,
@@ -489,8 +393,8 @@ export function useChat(options: UseChatOptions = {}) {
     newSession,
     loadSession,
     deleteSession,
-    fetchSessions,
+    fetchSessions: refetchSessions,
     connect,
-    disconnect
+    disconnect,
   };
 }
