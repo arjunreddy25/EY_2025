@@ -3,7 +3,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import {
     Users, Link2, ExternalLink, Copy, Check,
-    RefreshCw, ArrowLeft, Send, Search, Filter
+    RefreshCw, ArrowLeft, Send, Search, Filter, Mail
 } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 
@@ -37,7 +37,8 @@ interface LinkRecord {
     used_at: string | null;
 }
 
-const CRM_API_URL = 'http://localhost:8002';
+// Use main API server (consolidated endpoints)
+const API_URL = 'http://localhost:8000';
 
 export function CRMDashboard() {
     const [customers, setCustomers] = useState<Customer[]>([]);
@@ -48,20 +49,29 @@ export function CRMDashboard() {
     const [copiedId, setCopiedId] = useState<string | null>(null);
     const [sendingEmail, setSendingEmail] = useState<string | null>(null);
     const [generatingLink, setGeneratingLink] = useState<string | null>(null);
+    const [sendingBatch, setSendingBatch] = useState(false);
+    const [selectedCustomers, setSelectedCustomers] = useState<Set<string>>(new Set());
+    const [notification, setNotification] = useState<{ type: 'success' | 'error', message: string } | null>(null);
+
+    const showNotification = (type: 'success' | 'error', message: string) => {
+        setNotification({ type, message });
+        setTimeout(() => setNotification(null), 4000);
+    };
 
     const fetchCustomers = useCallback(async () => {
         try {
-            const response = await fetch(`${CRM_API_URL}/customers`);
+            const response = await fetch(`${API_URL}/crm/customers`);
             const data = await response.json();
             setCustomers(data);
         } catch (error) {
             console.error('Failed to fetch customers:', error);
+            showNotification('error', 'Failed to fetch customers');
         }
     }, []);
 
     const fetchLinks = useCallback(async () => {
         try {
-            const response = await fetch(`${CRM_API_URL}/links`);
+            const response = await fetch(`${API_URL}/crm/links`);
             const data = await response.json();
             setLinks(data);
         } catch (error) {
@@ -87,20 +97,18 @@ export function CRMDashboard() {
     const generateLink = async (customerId: string) => {
         setGeneratingLink(customerId);
         try {
-            const response = await fetch(`${CRM_API_URL}/generate-link/${customerId}`, {
+            const response = await fetch(`${API_URL}/crm/generate-link/${customerId}`, {
                 method: 'POST',
             });
             const data: GeneratedLink = await response.json();
 
-            // Copy to clipboard
             await navigator.clipboard.writeText(data.link);
             setCopiedId(customerId);
             setTimeout(() => setCopiedId(null), 2000);
-
-            // Refresh links
             await fetchLinks();
         } catch (error) {
             console.error('Failed to generate link:', error);
+            showNotification('error', 'Failed to generate link');
         } finally {
             setGeneratingLink(null);
         }
@@ -109,21 +117,80 @@ export function CRMDashboard() {
     const sendEmail = async (customerId: string) => {
         setSendingEmail(customerId);
         try {
-            const response = await fetch(`${CRM_API_URL}/send-email/${customerId}`, {
+            const response = await fetch(`${API_URL}/crm/send-email/${customerId}`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
             });
             const data = await response.json();
-            console.log('Email sent:', data);
 
-            // Refresh links
+            if (data.status === 'sent') {
+                showNotification('success', `Email sent to ${data.email}`);
+            } else {
+                showNotification('error', data.message || 'Failed to send email');
+            }
+
             await fetchLinks();
-
-            alert(`Email simulated for ${customerId}. Check server console for details.`);
         } catch (error) {
             console.error('Failed to send email:', error);
+            showNotification('error', 'Failed to send email');
         } finally {
             setSendingEmail(null);
+        }
+    };
+
+    const sendBatchEmails = async () => {
+        const customerIds = selectedCustomers.size > 0
+            ? Array.from(selectedCustomers)
+            : customers.map(c => c.customer_id);
+
+        if (customerIds.length === 0) {
+            showNotification('error', 'No customers to send emails to');
+            return;
+        }
+
+        const confirmed = window.confirm(
+            `Send emails to ${customerIds.length} customer(s)?`
+        );
+        if (!confirmed) return;
+
+        setSendingBatch(true);
+        try {
+            const response = await fetch(`${API_URL}/crm/send-batch-emails`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ customer_ids: customerIds }),
+            });
+            const data = await response.json();
+
+            showNotification(
+                data.sent > 0 ? 'success' : 'error',
+                `Sent: ${data.sent}, Failed: ${data.failed}`
+            );
+
+            setSelectedCustomers(new Set());
+            await fetchLinks();
+        } catch (error) {
+            console.error('Failed to send batch emails:', error);
+            showNotification('error', 'Failed to send batch emails');
+        } finally {
+            setSendingBatch(false);
+        }
+    };
+
+    const toggleSelectCustomer = (customerId: string) => {
+        const newSelected = new Set(selectedCustomers);
+        if (newSelected.has(customerId)) {
+            newSelected.delete(customerId);
+        } else {
+            newSelected.add(customerId);
+        }
+        setSelectedCustomers(newSelected);
+    };
+
+    const selectAllCustomers = () => {
+        if (selectedCustomers.size === filteredCustomers.length) {
+            setSelectedCustomers(new Set());
+        } else {
+            setSelectedCustomers(new Set(filteredCustomers.map(c => c.customer_id)));
         }
     };
 
@@ -161,6 +228,16 @@ export function CRMDashboard() {
 
     return (
         <div className="min-h-screen bg-background">
+            {/* Notification Toast */}
+            {notification && (
+                <div className={`fixed top-4 right-4 z-[100] px-4 py-3 rounded-lg shadow-lg transition-all ${notification.type === 'success'
+                    ? 'bg-green-500 text-white'
+                    : 'bg-red-500 text-white'
+                    }`}>
+                    {notification.message}
+                </div>
+            )}
+
             {/* Header */}
             <header className="sticky top-0 z-50 border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
                 <div className="container mx-auto px-4 py-4">
@@ -182,18 +259,36 @@ export function CRMDashboard() {
                             </div>
                         </div>
 
-                        <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={handleRefresh}
-                            disabled={loading}
-                        >
-                            <RefreshCw className={`size-4 mr-2 ${loading ? 'animate-spin' : ''}`} />
-                            Refresh
-                        </Button>
+                        <div className="flex items-center gap-2">
+                            <Button
+                                variant="default"
+                                size="sm"
+                                onClick={sendBatchEmails}
+                                disabled={sendingBatch || loading}
+                            >
+                                {sendingBatch ? (
+                                    <RefreshCw className="size-4 mr-2 animate-spin" />
+                                ) : (
+                                    <Mail className="size-4 mr-2" />
+                                )}
+                                {selectedCustomers.size > 0
+                                    ? `Email Selected (${selectedCustomers.size})`
+                                    : 'Email All'}
+                            </Button>
+                            <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={handleRefresh}
+                                disabled={loading}
+                            >
+                                <RefreshCw className={`size-4 mr-2 ${loading ? 'animate-spin' : ''}`} />
+                                Refresh
+                            </Button>
+                        </div>
                     </div>
                 </div>
             </header>
+
 
             <main className="container mx-auto px-4 py-6">
                 {/* Stats Cards */}

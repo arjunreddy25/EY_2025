@@ -1,13 +1,19 @@
 """
 FastAPI server for Loan Sales Assistant using Agno AgentOS patterns.
 Provides WebSocket and HTTP endpoints with async streaming support.
+Includes CRM functionality and SMTP email sending.
 """
 
 import asyncio
 import json
 import os
+import smtplib
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
 from contextlib import asynccontextmanager
-from typing import Optional
+from typing import Optional, List
+from datetime import datetime, timedelta
+from dotenv import load_dotenv
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -18,12 +24,35 @@ from agno.agent import RunEvent
 from agno.team.team import TeamRunEvent
 
 from main import loan_sales_team
+from db_neon import (
+    get_customer,
+    get_all_customers,
+    create_customer_link,
+    get_all_links,
+    verify_customer_link
+)
+
+load_dotenv()
+
+# Email Configuration
+SMTP_HOST = os.getenv("SMTP_HOST", "smtp.gmail.com")
+SMTP_PORT = int(os.getenv("SMTP_PORT", 587))
+SMTP_EMAIL = os.getenv("SMTP_EMAIL")
+APP_PASSWORD = os.getenv("APP_PASSWORD")
+FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:5173")
+
+print("--- CONFIGURATION CHECK ---")
+print(f"SMTP_EMAIL present: {bool(SMTP_EMAIL)}")
+print(f"APP_PASSWORD present: {bool(APP_PASSWORD)}")
+print("---------------------------")
+
+
 
 
 class ChatMessage(BaseModel):
     message: str
     session_id: Optional[str] = "default_session"
-    customer_id: Optional[str] = None  # From localStorage after ref link auth
+    customer_id: Optional[str] = None
     customer_name: Optional[str] = None
 
 
@@ -32,11 +61,89 @@ class HealthResponse(BaseModel):
     service: str
 
 
+class CustomerSummary(BaseModel):
+    customer_id: str
+    name: str
+    email: str
+    phone: str
+    city: str
+    credit_score: int
+    pre_approved_limit: float
+
+
+class LinkResponse(BaseModel):
+    ref_id: str
+    link: str
+    customer_id: str
+    customer_name: str
+    expires_at: str
+
+
+class SendEmailRequest(BaseModel):
+    customer_ids: Optional[List[str]] = None
+    subject: Optional[str] = "Your Pre-Approved Loan Offer is Ready! 🎉"
+
+
+class EmailResult(BaseModel):
+    customer_id: str
+    email: str
+    status: str
+    message: Optional[str] = None
+
+
+def send_smtp_email(to_email: str, customer_name: str, ref_link: str, pre_approved_limit: float, subject: str) -> dict:
+    """Send email via SMTP with Gmail App Password."""
+    if not SMTP_EMAIL or not APP_PASSWORD:
+        return {"status": "error", "message": "SMTP_EMAIL or APP_PASSWORD not configured"}
+    
+    html_content = f"""
+    <html>
+    <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto;">
+        <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 30px; text-align: center; border-radius: 10px 10px 0 0;">
+            <h1>🎉 Great News, {customer_name}!</h1>
+        </div>
+        <div style="background: #f9f9f9; padding: 30px; border-radius: 0 0 10px 10px;">
+            <p>Hi {customer_name},</p>
+            <p>We're excited to inform you that you've been <strong>pre-approved</strong> for a personal loan!</p>
+            <p style="color: #667eea; font-weight: bold; font-size: 24px;">Up to ₹{pre_approved_limit:,.0f}</p>
+            <p>Our AI-powered loan assistant is ready to help you:</p>
+            <ul>
+                <li>✅ Check your exact eligibility</li>
+                <li>✅ Calculate EMI for your desired amount</li>
+                <li>✅ Complete instant KYC verification</li>
+                <li>✅ Get your sanction letter in minutes</li>
+            </ul>
+            <p style="text-align: center;">
+                <a href="{ref_link}" style="display: inline-block; background: #667eea; color: white; padding: 15px 30px; text-decoration: none; border-radius: 5px; font-weight: bold;">
+                    Start Your Application →
+                </a>
+            </p>
+            <p style="font-size: 12px; color: #666;">This link is valid for 24 hours.</p>
+        </div>
+    </body>
+    </html>
+    """
+    
+    try:
+        msg = MIMEMultipart("alternative")
+        msg["Subject"] = subject
+        msg["From"] = SMTP_EMAIL
+        msg["To"] = to_email
+        
+        msg.attach(MIMEText(html_content, "html"))
+        
+        with smtplib.SMTP(SMTP_HOST, SMTP_PORT) as server:
+            server.starttls()
+            server.login(SMTP_EMAIL, APP_PASSWORD)
+            server.sendmail(SMTP_EMAIL, to_email, msg.as_string())
+        
+        return {"status": "sent", "message": "Email sent successfully"}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+
 def build_context_message(message: str, customer_id: Optional[str], customer_name: Optional[str]) -> str:
-    """
-    Inject customer context into the message for the agents.
-    This way agents know who they're talking to without asking.
-    """
+    """Inject customer context into the message for the agents."""
     if customer_id and customer_name:
         return f"[SYSTEM CONTEXT: Customer identified - ID: {customer_id}, Name: {customer_name}. Do NOT ask for customer ID - you already have it. Use this ID for all tool calls.]\n\nCustomer says: {message}"
     elif customer_id:
@@ -104,8 +211,6 @@ async def verify_reference_link(ref: str):
     Verify reference link from CRM email and return customer identity.
     Frontend stores this in localStorage for chatbot personalization.
     """
-    from db_neon import verify_customer_link
-    
     customer = verify_customer_link(ref)
     if not customer:
         raise HTTPException(status_code=401, detail="Invalid or expired link")
@@ -115,6 +220,172 @@ async def verify_reference_link(ref: str):
         "email": customer["email"],
         "name": customer["name"]
     }
+
+
+# ============================================
+# CRM Endpoints
+# ============================================
+
+@app.get("/crm/customers", response_model=List[CustomerSummary])
+async def list_customers():
+    """List all customers with summary info (optimized batch query)."""
+    customers = get_all_customers()
+    
+    return [
+        CustomerSummary(
+            customer_id=cid,
+            name=c.get("name", ""),
+            email=c.get("email", ""),
+            phone=c.get("phone", ""),
+            city=c.get("city", ""),
+            credit_score=c.get("credit_score", 0),
+            pre_approved_limit=c.get("pre_approved_limit", 0)
+        )
+        for cid, c in customers.items()
+    ]
+
+
+@app.get("/crm/customers/{customer_id}")
+async def get_customer_details(customer_id: str):
+    """Get full customer details."""
+    customer = get_customer(customer_id)
+    if not customer:
+        raise HTTPException(status_code=404, detail="Customer not found")
+    return customer
+
+
+@app.post("/crm/generate-link/{customer_id}", response_model=LinkResponse)
+async def generate_customer_link_endpoint(customer_id: str, expires_hours: int = 24):
+    """Generate a unique reference link for a customer."""
+    customer = get_customer(customer_id)
+    if not customer:
+        raise HTTPException(status_code=404, detail="Customer not found")
+    
+    ref_id = create_customer_link(customer_id, expires_hours)
+    if not ref_id:
+        raise HTTPException(status_code=500, detail="Failed to generate link")
+    
+    expires_at = datetime.now() + timedelta(hours=expires_hours)
+    
+    return LinkResponse(
+        ref_id=ref_id,
+        link=f"{FRONTEND_URL}?ref={ref_id}",
+        customer_id=customer_id,
+        customer_name=customer.get("name", ""),
+        expires_at=expires_at.isoformat()
+    )
+
+
+@app.post("/crm/send-email/{customer_id}")
+async def send_customer_email(customer_id: str, subject: str = "Your Pre-Approved Loan Offer is Ready! 🎉"):
+    """Generate link and send email to a single customer via SMTP."""
+    customer = get_customer(customer_id)
+    if not customer:
+        raise HTTPException(status_code=404, detail="Customer not found")
+    
+    ref_id = create_customer_link(customer_id)
+    if not ref_id:
+        raise HTTPException(status_code=500, detail="Failed to generate link")
+    
+    link = f"{FRONTEND_URL}?ref={ref_id}"
+    
+    result = send_smtp_email(
+        to_email=customer.get("email"),
+        customer_name=customer.get("name", "Customer"),
+        ref_link=link,
+        pre_approved_limit=customer.get("pre_approved_limit", 0),
+        subject=subject
+    )
+    
+    return {
+        "customer_id": customer_id,
+        "email": customer.get("email"),
+        "link": link,
+        "ref_id": ref_id,
+        **result
+    }
+
+
+@app.post("/crm/send-batch-emails")
+async def send_batch_emails(request: SendEmailRequest = None):
+    """Send emails to multiple customers (or all if none specified)."""
+    customer_ids = request.customer_ids if request and request.customer_ids else None
+    subject = request.subject if request else "Your Pre-Approved Loan Offer is Ready! 🎉"
+    
+    if customer_ids is None:
+        customers = get_all_customers()
+        customer_ids = list(customers.keys())
+    
+    results = []
+    sent_count = 0
+    failed_count = 0
+    
+    for customer_id in customer_ids:
+        try:
+            customer = get_customer(customer_id)
+            if not customer:
+                results.append({"customer_id": customer_id, "status": "failed", "message": "Customer not found"})
+                failed_count += 1
+                continue
+            
+            ref_id = create_customer_link(customer_id)
+            if not ref_id:
+                results.append({"customer_id": customer_id, "status": "failed", "message": "Failed to generate link"})
+                failed_count += 1
+                continue
+            
+            link = f"{FRONTEND_URL}?ref={ref_id}"
+            email_result = send_smtp_email(
+                to_email=customer.get("email"),
+                customer_name=customer.get("name", "Customer"),
+                ref_link=link,
+                pre_approved_limit=customer.get("pre_approved_limit", 0),
+                subject=subject
+            )
+            
+            results.append({
+                "customer_id": customer_id,
+                "email": customer.get("email"),
+                "link": link,
+                **email_result
+            })
+            
+            if email_result["status"] == "sent":
+                sent_count += 1
+            else:
+                failed_count += 1
+                
+        except Exception as e:
+            results.append({"customer_id": customer_id, "status": "failed", "message": str(e)})
+            failed_count += 1
+    
+    return {
+        "total": len(customer_ids),
+        "sent": sent_count,
+        "failed": failed_count,
+        "results": results
+    }
+
+
+@app.get("/crm/links")
+async def list_all_links():
+    """Get all generated customer links."""
+    links = get_all_links()
+    
+    return [
+        {
+            "ref_id": link["ref_id"],
+            "customer_id": link["customer_id"],
+            "customer_name": link.get("name", ""),
+            "customer_email": link.get("email", ""),
+            "link": f"{FRONTEND_URL}?ref={link['ref_id']}",
+            "created_at": link["created_at"].isoformat() if link.get("created_at") else None,
+            "expires_at": link["expires_at"].isoformat() if link.get("expires_at") else None,
+            "used": link.get("used", False),
+            "used_at": link["used_at"].isoformat() if link.get("used_at") else None
+        }
+        for link in links
+    ]
 
 
 @app.post("/chat")
