@@ -2,10 +2,15 @@ import { useState, useEffect, useCallback } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import {
+    Dialog, DialogContent, DialogDescription, DialogFooter,
+    DialogHeader, DialogTitle, DialogTrigger,
+} from "@/components/ui/dialog";
+import {
     Users, Link2, ExternalLink, Copy, Check,
-    RefreshCw, ArrowLeft, Send, Search, Filter, Mail, Trash2
+    RefreshCw, ArrowLeft, Send, Search, Filter, Mail, Trash2, Plus
 } from 'lucide-react';
 import { Input } from '@/components/ui/input';
+
 
 interface Customer {
     customer_id: string;
@@ -47,6 +52,19 @@ export function CRMDashboard() {
     const [deletingCustomers, setDeletingCustomers] = useState(false);
     const [selectedCustomers, setSelectedCustomers] = useState<Set<string>>(new Set());
     const [notification, setNotification] = useState<{ type: 'success' | 'error', message: string } | null>(null);
+
+    // Add Customer State
+    const [isAddCustomerOpen, setIsAddCustomerOpen] = useState(false);
+    const [addingCustomer, setAddingCustomer] = useState(false);
+    const [newCustomer, setNewCustomer] = useState<Customer>({
+        customer_id: '',
+        name: '',
+        email: '',
+        phone: '',
+        city: '',
+        credit_score: 750,
+        pre_approved_limit: 100000
+    });
 
     const showNotification = (type: 'success' | 'error', message: string) => {
         setNotification({ type, message });
@@ -188,6 +206,47 @@ export function CRMDashboard() {
         }
     };
 
+    const handleAddCustomer = async () => {
+        if (!newCustomer.customer_id || !newCustomer.name || !newCustomer.email) {
+            showNotification('error', 'Please fill in all required fields');
+            return;
+        }
+
+        setAddingCustomer(true);
+        try {
+            // Using /crm/customers endpoint for adding new customer (assuming standard REST practice or typical pattern)
+            // If the backend has a different specific endpoint, it should be adjusted, but based on reading likely /crm/customers POST
+            const response = await fetch(`${API_URL}/crm/customers`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(newCustomer),
+            });
+
+            if (response.ok) {
+                showNotification('success', 'Customer added successfully');
+                setIsAddCustomerOpen(false);
+                setNewCustomer({
+                    customer_id: '',
+                    name: '',
+                    email: '',
+                    phone: '',
+                    city: '',
+                    credit_score: 750,
+                    pre_approved_limit: 100000
+                });
+                await fetchCustomers();
+            } else {
+                const data = await response.json();
+                showNotification('error', data.message || 'Failed to add customer');
+            }
+        } catch (error) {
+            console.error('Failed to add customer:', error);
+            showNotification('error', 'Failed to add customer');
+        } finally {
+            setAddingCustomer(false);
+        }
+    };
+
     const toggleSelectCustomer = (customerId: string) => {
         const newSelected = new Set(selectedCustomers);
         if (newSelected.has(customerId)) {
@@ -304,6 +363,116 @@ export function CRMDashboard() {
                                     ? `Email Selected (${selectedCustomers.size})`
                                     : 'Email All Customers'}
                             </Button>
+
+                            <Dialog open={isAddCustomerOpen} onOpenChange={setIsAddCustomerOpen}>
+                                <DialogTrigger asChild>
+                                    <Button size="sm" variant="secondary">
+                                        <Plus className="size-4 mr-2" />
+                                        Add Customer
+                                    </Button>
+                                </DialogTrigger>
+                                <DialogContent className="sm:max-w-[425px]">
+                                    <DialogHeader>
+                                        <DialogTitle>Add New Customer</DialogTitle>
+                                        <DialogDescription>
+                                            Enter the details of the new customer here. Click save when you're done.
+                                        </DialogDescription>
+                                    </DialogHeader>
+                                    <div className="grid gap-4 py-4">
+                                        <div className="grid grid-cols-4 items-center gap-4">
+                                            <label htmlFor="customer_id" className="text-right text-sm font-medium">
+                                                ID
+                                            </label>
+                                            <Input
+                                                id="customer_id"
+                                                value={newCustomer.customer_id}
+                                                onChange={(e) => setNewCustomer({ ...newCustomer, customer_id: e.target.value })}
+                                                className="col-span-3"
+                                                placeholder="CUST001"
+                                            />
+                                        </div>
+                                        <div className="grid grid-cols-4 items-center gap-4">
+                                            <label htmlFor="name" className="text-right text-sm font-medium">
+                                                Name
+                                            </label>
+                                            <Input
+                                                id="name"
+                                                value={newCustomer.name}
+                                                onChange={(e) => setNewCustomer({ ...newCustomer, name: e.target.value })}
+                                                className="col-span-3"
+                                                placeholder="John Doe"
+                                            />
+                                        </div>
+                                        <div className="grid grid-cols-4 items-center gap-4">
+                                            <label htmlFor="email" className="text-right text-sm font-medium">
+                                                Email
+                                            </label>
+                                            <Input
+                                                id="email"
+                                                type="email"
+                                                value={newCustomer.email}
+                                                onChange={(e) => setNewCustomer({ ...newCustomer, email: e.target.value })}
+                                                className="col-span-3"
+                                                placeholder="john@example.com"
+                                            />
+                                        </div>
+                                        <div className="grid grid-cols-4 items-center gap-4">
+                                            <label htmlFor="phone" className="text-right text-sm font-medium">
+                                                Phone
+                                            </label>
+                                            <Input
+                                                id="phone"
+                                                value={newCustomer.phone}
+                                                onChange={(e) => setNewCustomer({ ...newCustomer, phone: e.target.value })}
+                                                className="col-span-3"
+                                                placeholder="+91..."
+                                            />
+                                        </div>
+                                        <div className="grid grid-cols-4 items-center gap-4">
+                                            <label htmlFor="city" className="text-right text-sm font-medium">
+                                                City
+                                            </label>
+                                            <Input
+                                                id="city"
+                                                value={newCustomer.city}
+                                                onChange={(e) => setNewCustomer({ ...newCustomer, city: e.target.value })}
+                                                className="col-span-3"
+                                                placeholder="Mumbai"
+                                            />
+                                        </div>
+                                        <div className="grid grid-cols-4 items-center gap-4">
+                                            <label htmlFor="credit_score" className="text-right text-sm font-medium">
+                                                Score
+                                            </label>
+                                            <Input
+                                                id="credit_score"
+                                                type="number"
+                                                value={newCustomer.credit_score}
+                                                onChange={(e) => setNewCustomer({ ...newCustomer, credit_score: parseInt(e.target.value) || 0 })}
+                                                className="col-span-3"
+                                            />
+                                        </div>
+                                        <div className="grid grid-cols-4 items-center gap-4">
+                                            <label htmlFor="limit" className="text-right text-sm font-medium">
+                                                Limit
+                                            </label>
+                                            <Input
+                                                id="limit"
+                                                type="number"
+                                                value={newCustomer.pre_approved_limit}
+                                                onChange={(e) => setNewCustomer({ ...newCustomer, pre_approved_limit: parseInt(e.target.value) || 0 })}
+                                                className="col-span-3"
+                                            />
+                                        </div>
+                                    </div>
+                                    <DialogFooter>
+                                        <Button type="submit" onClick={handleAddCustomer} disabled={addingCustomer}>
+                                            {addingCustomer && <RefreshCw className="mr-2 h-4 w-4 animate-spin" />}
+                                            Save Customer
+                                        </Button>
+                                    </DialogFooter>
+                                </DialogContent>
+                            </Dialog>
                             <Button
                                 variant="outline"
                                 size="sm"

@@ -13,9 +13,9 @@ interface MessageBubbleProps {
 
 function ToolCallBadge({ toolCall }: { toolCall: ToolCall }) {
   const isCompleted = toolCall.status === 'completed';
-  
+
   return (
-    <Badge 
+    <Badge
       variant={isCompleted ? "secondary" : "outline"}
       className={cn(
         "gap-1.5 text-xs font-normal",
@@ -141,12 +141,12 @@ export function MessageBubble({ message }: MessageBubbleProps) {
           ) : isUser ? (
             <div className="whitespace-pre-wrap break-words">
               {message.content}
-              </div>
-            ) : (
-              <div className="prose prose-sm dark:prose-invert max-w-none prose-p:my-1 prose-ul:my-1 prose-ol:my-1 prose-li:my-0.5 prose-headings:my-2">
-                <ReactMarkdown>
-                  {message.content}
-                </ReactMarkdown>
+            </div>
+          ) : (
+            <div className="prose prose-sm dark:prose-invert max-w-none prose-p:my-1 prose-ul:my-1 prose-ol:my-1 prose-li:my-0.5 prose-headings:my-2">
+              <ReactMarkdown>
+                {message.content}
+              </ReactMarkdown>
               {message.isStreaming && (
                 <span className="ml-1 inline-block h-4 w-1 animate-pulse bg-current" />
               )}
@@ -195,9 +195,9 @@ export function MessageBubble({ message }: MessageBubbleProps) {
           "mt-1 text-[10px] text-muted-foreground",
           isUser ? "text-right" : "text-left"
         )}>
-          {message.timestamp.toLocaleTimeString([], { 
-            hour: '2-digit', 
-            minute: '2-digit' 
+          {message.timestamp.toLocaleTimeString([], {
+            hour: '2-digit',
+            minute: '2-digit'
           })}
         </div>
       </div>
@@ -224,7 +224,7 @@ export function MessageListSkeleton() {
           <Skeleton className="h-16 w-64 rounded-2xl" />
         </div>
       </div>
-      
+
       {/* Assistant message skeleton */}
       <div className="flex justify-start">
         <div className="max-w-[70%] space-y-2">
