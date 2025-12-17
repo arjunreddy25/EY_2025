@@ -190,7 +190,7 @@ export function Sidebar({
         {/* Bottom Section */}
         <div className="shrink-0 p-3 space-y-1">
           {/* Help */}
-          <Tooltip>
+          {/* <Tooltip>
             <TooltipTrigger asChild>
               <Button
                 variant="ghost"
@@ -207,7 +207,7 @@ export function Sidebar({
             {!isOpen && (
               <TooltipContent side="right">Help & FAQ</TooltipContent>
             )}
-          </Tooltip>
+          </Tooltip> */}
 
           {/* Theme Toggle */}
           <Tooltip>

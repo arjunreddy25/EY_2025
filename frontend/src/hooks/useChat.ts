@@ -367,13 +367,14 @@ export function useChat(options: UseChatOptions = {}) {
     ]
   );
 
-  // Create new session (just resets state)
+  // Create new session (just resets state, navigates to welcome - session created on first message)
   const newSession = useCallback(() => {
     const newId = `session_${Date.now()}`;
     setCurrentSessionId(newId);
     setMessages([]);
+    autoGreetSentRef.current = false; // Reset greeting flag for new session
     disconnect();
-    onNavigate?.(`/chat/${newId}`);
+    onNavigate?.(`/`); // Go to welcome page, not /chat/id
     return newId;
   }, [disconnect, onNavigate]);
 
@@ -431,19 +432,35 @@ export function useChat(options: UseChatOptions = {}) {
   }, [currentSessionId]); // Only depend on sessionId, not on connect/disconnect
 
   // Auto-greet user when they land from email link (has customer data)
+  // ONLY for NEW sessions - not when loading existing sessions from chat list
   useEffect(() => {
-    // Only send greeting once per session, when no existing messages, and has customer data
     const customer = getCustomerInfo();
+    // Check if this session already exists in database (user clicked from chat list)
+    const sessionExistsInDB = sessions.some((s) => s.id === currentSessionId);
+
+    // Only send greeting for NEW sessions with customer data
     if (
       customer?.customer_id &&
       !autoGreetSentRef.current &&
+      !sessionExistsInDB &&  // KEY: Only for new sessions, not existing ones
       messages.length === 0 &&
       isConnected &&
       !isLoading
     ) {
       autoGreetSentRef.current = true;
       // Small delay to ensure connection is ready
-      const greetTimeout = setTimeout(() => {
+      const greetTimeout = setTimeout(async () => {
+        // Create session in database for email redirect users
+        try {
+          await createSessionMutation.mutateAsync({
+            sessionId: currentSessionId,
+            title: `Chat with ${customer.name || 'Customer'}`,
+          });
+          onNavigate?.(`/chat/${currentSessionId}`);
+        } catch (e) {
+          console.error('Failed to create session for greeting:', e);
+        }
+
         // Inject a proper AI greeting message directly
         const greetingMessage: Message = {
           id: `msg_greeting_${Date.now()}`,
@@ -460,7 +477,7 @@ export function useChat(options: UseChatOptions = {}) {
       }, 300);
       return () => clearTimeout(greetTimeout);
     }
-  }, [isConnected, messages.length, isLoading, getCustomerInfo, saveMessage]);
+  }, [isConnected, messages.length, isLoading, getCustomerInfo, saveMessage, sessions, currentSessionId, createSessionMutation, onNavigate]);
 
   return {
     messages,
