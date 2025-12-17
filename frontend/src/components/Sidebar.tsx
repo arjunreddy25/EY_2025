@@ -2,6 +2,7 @@ import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Separator } from '@/components/ui/separator';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
+import { Skeleton } from '@/components/ui/skeleton';
 import { 
   Plus, 
   MessageSquare, 
@@ -26,6 +27,7 @@ interface SidebarProps {
   onNewChat: () => void;
   onSelectSession: (session: ChatSession) => void;
   onDeleteSession?: (sessionId: string) => void;
+  isLoadingSessions?: boolean;
   theme: 'light' | 'dark';
   onToggleTheme: () => void;
   user?: { email: string } | null;
@@ -40,12 +42,12 @@ export function Sidebar({
   onNewChat,
   onSelectSession,
   onDeleteSession,
+  isLoadingSessions = false,
   theme,
   onToggleTheme,
   user,
   onLogout,
 }: SidebarProps) {
-  const groupedSessions = groupSessionsByDate(sessions);
 
   return (
     <TooltipProvider>
@@ -56,21 +58,26 @@ export function Sidebar({
         )}
       >
         {/* Header with Logo */}
-        <div className="flex items-center gap-3 p-4">
-          <div className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-primary text-primary-foreground shadow-md">
-            <CreditCard className="size-5" />
-          </div>
+        <div className={cn(
+          "flex items-center p-4",
+          isOpen ? "gap-3" : "justify-center"
+        )}>
           {isOpen && (
-            <div className="flex-1 min-w-0">
-              <h1 className="font-bold text-lg leading-tight">NBFC Loans</h1>
-              <p className="text-xs text-muted-foreground truncate">Personal Loan Assistant</p>
-            </div>
+            <>
+              <div className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-primary text-primary-foreground shadow-md">
+                <CreditCard className="size-5" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <h1 className="font-bold text-lg leading-tight">NBFC Loans</h1>
+                <p className="text-xs text-muted-foreground truncate">Personal Loan Assistant</p>
+              </div>
+            </>
           )}
           <Tooltip>
             <TooltipTrigger asChild>
               <Button
                 variant="ghost"
-                size="icon-sm"
+                size="icon"
                 onClick={onToggle}
                 className="shrink-0"
               >
@@ -109,46 +116,60 @@ export function Sidebar({
         {/* Chat History */}
         <ScrollArea className="flex-1">
           <div className="px-3">
-            {isOpen && sessions.length > 0 && (
-              <div className="space-y-4 py-2">
-                {Object.entries(groupedSessions).map(([label, groupSessions]) => (
-                  <div key={label}>
-                    <p className="mb-2 px-3 text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">
-                      {label}
-                    </p>
-                    <div className="space-y-1">
-                      {groupSessions.map((session) => (
-                        <Button
-                          key={session.id}
-                          variant={session.id === currentSessionId ? "secondary" : "ghost"}
-                          onClick={() => onSelectSession(session)}
-                          className="group w-full justify-start gap-3 px-3 py-2 h-auto text-left"
-                        >
-                          <MessageSquare className="size-4 shrink-0 text-muted-foreground" />
-                          <div className="flex-1 min-w-0">
-                            <span className="block truncate text-sm">
-                              {session.title}
-                            </span>
-                            <span className="block text-[10px] text-muted-foreground">
-                              {session.createdAt.toLocaleDateString()}
-                            </span>
-                          </div>
-                          <Trash2
-                            className="size-4 shrink-0 opacity-0 transition-opacity group-hover:opacity-100 text-muted-foreground hover:text-destructive"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              onDeleteSession?.(session.id);
-                            }}
-                          />
-                        </Button>
-                      ))}
+            {/* Skeleton Loading */}
+            {isOpen && isLoadingSessions && (
+              <div className="space-y-2 py-2">
+                {[...Array(4)].map((_, i) => (
+                  <div key={i} className="flex items-center gap-3 px-3 py-2">
+                    <Skeleton className="size-4 rounded" />
+                    <Skeleton className="h-4 flex-1" />
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Sessions List - Simple flat list, no date grouping */}
+            {isOpen && !isLoadingSessions && sessions.length > 0 && (
+              <div className="space-y-1 py-2">
+                {sessions.map((session) => (
+                  <div
+                    key={session.id}
+                    onClick={() => onSelectSession(session)}
+                    className={`group w-full flex flex-row items-center justify-between gap-2 px-3 py-2.5 rounded-md cursor-pointer text-left ${session.id === currentSessionId
+                      ? 'bg-secondary text-secondary-foreground'
+                      : 'hover:bg-accent hover:text-accent-foreground'
+                      }`}
+                  >
+                    <span className="flex-1 text-sm min-w-0 truncate">
+                      {session.title || 'New Chat'}
+                    </span>
+                    <div
+                      role="button"
+                      tabIndex={0}
+                      onClick={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        onDeleteSession?.(session.id);
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          onDeleteSession?.(session.id);
+                        }
+                      }}
+                      className="size-5 shrink-0 opacity-0 transition-opacity group-hover:opacity-100 text-muted-foreground hover:text-destructive flex items-center justify-center cursor-pointer"
+                      aria-label="Delete chat"
+                    >
+                      <Trash2 className="size-4" />
                     </div>
                   </div>
                 ))}
               </div>
             )}
 
-            {isOpen && sessions.length === 0 && (
+            {/* Empty State */}
+            {isOpen && !isLoadingSessions && sessions.length === 0 && (
               <div className="py-12 text-center">
                 <div className="mx-auto mb-3 flex size-12 items-center justify-center rounded-full bg-muted">
                   <MessageSquare className="size-6 text-muted-foreground" />
@@ -160,27 +181,7 @@ export function Sidebar({
               </div>
             )}
 
-            {!isOpen && sessions.length > 0 && (
-              <div className="space-y-1 py-2">
-                {sessions.slice(0, 6).map((session) => (
-                  <Tooltip key={session.id}>
-                    <TooltipTrigger asChild>
-                      <Button
-                        variant={session.id === currentSessionId ? "secondary" : "ghost"}
-                        size="icon"
-                        onClick={() => onSelectSession(session)}
-                        className="mx-auto"
-                      >
-                        <MessageSquare className="size-4" />
-                      </Button>
-                    </TooltipTrigger>
-                    <TooltipContent side="right">
-                      {session.title}
-                    </TooltipContent>
-                  </Tooltip>
-                ))}
-              </div>
-            )}
+            {/* When sidebar is collapsed, don't show session icons - just empty space */}
           </div>
         </ScrollArea>
 
@@ -297,34 +298,4 @@ export function Sidebar({
       </div>
     </TooltipProvider>
   );
-}
-
-function groupSessionsByDate(sessions: ChatSession[]): Record<string, ChatSession[]> {
-  const groups: Record<string, ChatSession[]> = {};
-  const now = new Date();
-  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  const yesterday = new Date(today.getTime() - 24 * 60 * 60 * 1000);
-  const lastWeek = new Date(today.getTime() - 7 * 24 * 60 * 60 * 1000);
-
-  sessions.forEach((session) => {
-    const sessionDate = new Date(session.createdAt);
-    let label: string;
-
-    if (sessionDate >= today) {
-      label = 'Today';
-    } else if (sessionDate >= yesterday) {
-      label = 'Yesterday';
-    } else if (sessionDate >= lastWeek) {
-      label = 'Previous 7 Days';
-    } else {
-      label = 'Older';
-    }
-
-    if (!groups[label]) {
-      groups[label] = [];
-    }
-    groups[label].push(session);
-  });
-
-  return groups;
 }

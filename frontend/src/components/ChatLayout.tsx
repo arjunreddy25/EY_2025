@@ -1,4 +1,5 @@
 import { useState, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Sidebar } from './Sidebar';
 import { ChatArea } from './ChatArea';
 import { ChatInput } from './ChatInput';
@@ -34,10 +35,12 @@ export function ChatLayout({ chatId }: { chatId?: string } = {}) {
   const [loginLoading, setLoginLoading] = useState(false);
 
   const { resolvedTheme, toggleTheme } = useTheme();
+  const navigate = useNavigate();
   
   const {
     messages,
     isLoading,
+    isLoadingSessions,
     currentToolCall,
     sessions,
     currentSessionId,
@@ -45,7 +48,10 @@ export function ChatLayout({ chatId }: { chatId?: string } = {}) {
     newSession,
     loadSession,
     deleteSession,
-  } = useChat({ initialSessionId: chatId });
+  } = useChat({
+    initialSessionId: chatId,
+    onNavigate: navigate
+  });
 
   const handleSuggestionClick = useCallback((suggestion: string) => {
     sendMessage(suggestion);
@@ -92,6 +98,7 @@ export function ChatLayout({ chatId }: { chatId?: string } = {}) {
         onNewChat={newSession}
         onSelectSession={loadSession}
         onDeleteSession={deleteSession}
+        isLoadingSessions={isLoadingSessions}
         theme={resolvedTheme}
         onToggleTheme={toggleTheme}
         user={user}

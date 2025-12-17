@@ -3,6 +3,7 @@ from agno.tools import tool
 import json
 import os
 import requests
+from datetime import datetime
 from db_neon import get_all_customers
 
 # Load customer data from NeonDB
@@ -287,7 +288,6 @@ def generate_sanction_letter(customer_id: str, loan_amount: float, tenure: int, 
     Generate automated PDF sanction letter for approved loans.
     Includes customer name, approved amount, interest rate, tenure, EMI, and approval date.
     """
-    from datetime import datetime
     
     customer = load_customer_data().get(customer_id)
     if not customer:

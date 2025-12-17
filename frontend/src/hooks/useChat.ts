@@ -31,6 +31,7 @@ export interface ChatSession {
 interface UseChatOptions {
   wsUrl?: string;
   initialSessionId?: string;
+  onNavigate?: (path: string) => void;
 }
 
 // Helper to get/set anonymous session IDs in localStorage
@@ -59,7 +60,8 @@ function removeStoredSessionId(sessionId: string): void {
 export function useChat(options: UseChatOptions = {}) {
   const { 
     wsUrl = 'ws://localhost:8000/ws/chat',
-    initialSessionId
+    initialSessionId,
+    onNavigate
   } = options;
 
   const [messages, setMessages] = useState<Message[]>([]);
@@ -138,20 +140,51 @@ export function useChat(options: UseChatOptions = {}) {
     }
   }, [getCustomerInfo]);
 
-  // Save message to API
+  // Save message to API and update local state optimistically
   const saveMessageToAPI = useCallback(async (sessionId: string, role: string, content: string, toolCalls?: ToolCall[]) => {
     try {
-      await fetch(`${API_BASE}/chat/sessions/${sessionId}/messages`, {
+      const response = await fetch(`${API_BASE}/chat/sessions/${sessionId}/messages`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ role, content, tool_calls: toolCalls })
       });
-      // Refresh sessions to update sidebar
-      fetchSessions();
+
+      if (response.ok && role === 'user') {
+        // Update local session title optimistically for first user message
+        setSessions(prev => {
+          const session = prev.find(s => s.id === sessionId);
+          if (session && (session.title === 'New Chat' || !session.title)) {
+            // Use first 40 chars of message as title (will be replaced by AI title later)
+            const newTitle = content.length > 40 ? content.slice(0, 40) + '...' : content;
+            return prev.map(s =>
+              s.id === sessionId
+                ? { ...s, title: newTitle, lastMessagePreview: content }
+                : s
+            );
+          }
+          return prev;
+        });
+
+        // Request AI-generated title (non-blocking)
+        fetch(`${API_BASE}/chat/sessions/${sessionId}/generate-title`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ message: content })
+        }).then(async res => {
+          if (res.ok) {
+            const data = await res.json();
+            if (data.title) {
+              setSessions(prev => prev.map(s =>
+                s.id === sessionId ? { ...s, title: data.title } : s
+              ));
+            }
+          }
+        }).catch(() => { }); // Ignore errors, title already set to truncated message
+      }
     } catch (e) {
       console.error('Error saving message:', e);
     }
-  }, [fetchSessions]);
+  }, []);
 
   // Create session in API
   const createSessionInAPI = useCallback(async (sessionId: string, title: string = 'New Chat') => {
@@ -337,6 +370,26 @@ export function useChat(options: UseChatOptions = {}) {
 
     const messageContent = file ? `${content}\n\n[Attached: ${file.name}]` : content;
 
+    // Auto-create session if this is the first message (messages is empty)
+    const isFirstMessage = messages.length === 0;
+    if (isFirstMessage) {
+      // Check if session exists in our local sessions list
+      const sessionExists = sessions.some(s => s.id === currentSessionId);
+      if (!sessionExists) {
+        // Create session in API first
+        await createSessionInAPI(currentSessionId, 'New Chat');
+        // Update local sessions list
+        setSessions(prev => [{
+          id: currentSessionId,
+          title: 'New Chat',
+          createdAt: new Date(),
+          messageCount: 0
+        }, ...prev]);
+        // Navigate to the new session URL
+        onNavigate?.(`/chat/${currentSessionId}`);
+      }
+    }
+
     // Add user message to UI
     const userMessage: Message = {
       id: `msg_${Date.now()}`,
@@ -360,32 +413,33 @@ export function useChat(options: UseChatOptions = {}) {
       customer_id: customer?.customer_id || null,
       customer_name: customer?.name || null
     }));
-  }, [connect, currentSessionId, saveMessageToAPI, getCustomerInfo]);
+  }, [connect, currentSessionId, saveMessageToAPI, getCustomerInfo, messages.length, sessions, createSessionInAPI, onNavigate]);
 
-  // Create new session
+  // Create new session - just resets state, actual session is created on first message
   const newSession = useCallback(async () => {
     const newId = `session_${Date.now()}`;
 
-    // Create in API
-    await createSessionInAPI(newId, 'New Chat');
-
-    // Update state
+    // Just update state - don't create in API yet (will be created on first message)
     setCurrentSessionId(newId);
     setMessages([]);
     disconnect();
 
-    // Refresh sessions list
-    await fetchSessions();
+    // Navigate to new session URL (will show welcome screen since no messages)
+    onNavigate?.(`/chat/${newId}`);
 
     return newId;
-  }, [disconnect, createSessionInAPI, fetchSessions]);
+  }, [disconnect, onNavigate]);
 
   // Load a session
   const loadSession = useCallback(async (session: ChatSession) => {
     disconnect();
     setCurrentSessionId(session.id);
+
+    // Navigate to session URL
+    onNavigate?.(`/chat/${session.id}`);
+
     await loadSessionMessages(session.id);
-  }, [disconnect, loadSessionMessages]);
+  }, [disconnect, loadSessionMessages, onNavigate]);
 
   // Delete a session
   const deleteSession = useCallback(async (sessionId: string) => {

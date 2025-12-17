@@ -8,6 +8,7 @@ import asyncio
 import json
 import os
 import smtplib
+import traceback
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from contextlib import asynccontextmanager
@@ -19,6 +20,7 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
+from groq import Groq
 
 from agno.agent import RunEvent
 from agno.team.team import TeamRunEvent
@@ -558,6 +560,60 @@ async def save_message(session_id: str, request: SaveMessageRequest):
         **message,
         "created_at": message["created_at"].isoformat() if message.get("created_at") else None,
     }
+
+
+class GenerateTitleRequest(BaseModel):
+    message: str
+
+
+@app.post("/chat/sessions/{session_id}/generate-title")
+async def generate_chat_title(session_id: str, request: GenerateTitleRequest):
+    """
+    Generate an AI-powered title for a chat session based on the first message.
+    Uses Groq API directly to create a concise, descriptive title.
+    """
+    try:
+        client = Groq(api_key=os.getenv("GROQ_API_KEY"))
+        
+        # Use Groq to generate a title
+        prompt = f"""Generate a very short (3-6 words max) title for a chat conversation that starts with this message:
+
+"{request.message}"
+
+Rules:
+- Maximum 6 words
+- No quotes in the output
+- Be descriptive but concise
+- Focus on the main topic/intent
+
+Just output the title, nothing else."""
+
+        response = client.chat.completions.create(
+            model="llama-3.3-70b-versatile",
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=30,
+            temperature=0.5
+        )
+        
+        # Extract title from response
+        title = response.choices[0].message.content.strip().strip('"\'')[:50]
+        
+        print(f"✅ Generated title: '{title}' for session {session_id}")
+        
+        # Update session title in database
+        if title and len(title) > 3:
+            update_session_title(session_id, title)
+            return {"title": title, "session_id": session_id}
+        else:
+            raise ValueError("AI returned invalid title")
+            
+    except Exception as e:
+        print(f"❌ Error generating title: {e}")
+        traceback.print_exc()
+        # Fall back to truncated message
+        fallback = request.message[:40] + "..." if len(request.message) > 40 else request.message
+        update_session_title(session_id, fallback)
+        return {"title": fallback, "session_id": session_id}
 
 
 @app.post("/chat/sessions/link-to-customer")

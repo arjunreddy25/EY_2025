@@ -5,7 +5,7 @@ Run on port 8002.
 """
 
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Optional, List
 
 from fastapi import FastAPI, HTTPException
@@ -114,7 +114,6 @@ async def generate_customer_link(customer_id: str, expires_hours: int = 24):
     if not ref_id:
         raise HTTPException(status_code=500, detail="Failed to generate link")
     
-    from datetime import timedelta
     expires_at = datetime.now() + timedelta(hours=expires_hours)
     
     return LinkResponse(

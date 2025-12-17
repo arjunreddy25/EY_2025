@@ -2,10 +2,13 @@ import os
 import json
 from dotenv import load_dotenv
 
-from agno.agent import Agent
+import asyncio
+from datetime import datetime
+from agno.agent import Agent, RunEvent
 from agno.team import Team
+from agno.team.team import TeamRunEvent
 from agno.models.groq import Groq
-from agno.db.sqlite import SqliteDb
+from agno.db.postgres import PostgresDb
 
 from tools import fetch_preapproved_offer, calculate_emi, fetch_kyc_from_crm, fetch_credit_score, validate_loan_eligibility, generate_sanction_letter
 from prompts import SALES_AGENT_PROMPT, VERIFICATION_AGENT_PROMPT, UNDERWRITING_AGENT_PROMPT, SANCTION_AGENT_PROMPT
@@ -18,6 +21,9 @@ GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 if not GROQ_API_KEY:
     raise RuntimeError("GROQ_API_KEY is not set in environment or .env file")
 
+NEON_DB_URL = os.getenv("NEON_DB")
+if not NEON_DB_URL:
+    raise RuntimeError("NEON_DB is not set in environment or .env file")
 
 
 
@@ -32,10 +38,10 @@ groq_model = Groq(
 # - "llama-3.1-70b-versatile"
 
 
-
-db = SqliteDb(
-    db_file="loan_sessions.db",
-    session_table="loan_conversations"
+# Use PostgresDb with NeonDB for agent memory
+db = PostgresDb(
+    db_url=NEON_DB_URL,
+    session_table="agent_sessions"
 )
 
 def load_customer_data():
@@ -145,10 +151,6 @@ loan_sales_team = Team(
 
 
 if __name__ == "__main__":
-    import asyncio
-    from datetime import datetime
-    from agno.agent import RunEvent
-    from agno.team.team import TeamRunEvent
     
     async def process_message(user_input: str, session_id: str):
         """Process a single message asynchronously with concurrent member execution."""
