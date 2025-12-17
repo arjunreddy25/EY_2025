@@ -164,28 +164,33 @@ def send_smtp_email(to_email: str, customer_name: str, ref_link: str, pre_approv
     
     html_content = f"""
     <html>
-    <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto;">
-        <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 30px; text-align: center; border-radius: 10px 10px 0 0;">
-            <h1>🎉 Great News, {customer_name}!</h1>
+    <body style="font-family: 'Segoe UI', Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; background: #f5f5f5; padding: 20px;">
+        <div style="background: #1a1a2e; color: white; padding: 25px; text-align: center; border-radius: 8px 8px 0 0;">
+            <h1 style="margin: 0; font-weight: 500;">Pre-Approved Personal Loan</h1>
+            <p style="margin: 8px 0 0 0; opacity: 0.9;">Exclusive offer for {customer_name}</p>
         </div>
-        <div style="background: #f9f9f9; padding: 30px; border-radius: 0 0 10px 10px;">
-            <p>Hi {customer_name},</p>
-            <p>We're excited to inform you that you've been <strong>pre-approved</strong> for a personal loan!</p>
-            <p style="color: #667eea; font-weight: bold; font-size: 24px;">Up to ₹{pre_approved_limit:,.0f}</p>
-            <p>Our AI-powered loan assistant is ready to help you:</p>
-            <ul>
-                <li>✅ Check your exact eligibility</li>
-                <li>✅ Calculate EMI for your desired amount</li>
-                <li>✅ Complete instant KYC verification</li>
-                <li>✅ Get your sanction letter in minutes</li>
+        <div style="background: white; padding: 25px; border-radius: 0 0 8px 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.1);">
+            <p style="margin-top: 0;">Hello {customer_name},</p>
+            <p>Great news! Based on your credit profile, you have been <strong>pre-approved</strong> for a personal loan.</p>
+            <div style="background: #f8f9fa; border-radius: 6px; padding: 20px; text-align: center; margin: 20px 0;">
+                <p style="margin: 0; color: #666; font-size: 14px;">Pre-Approved Amount</p>
+                <p style="margin: 8px 0 0 0; color: #1a1a2e; font-size: 28px; font-weight: 600;">Rs. {pre_approved_limit:,.0f}</p>
+            </div>
+            <p style="font-weight: 500;">What you can do:</p>
+            <ul style="padding-left: 20px;">
+                <li>Check your exact eligibility</li>
+                <li>Calculate EMI for your preferred amount</li>
+                <li>Complete instant KYC verification</li>
+                <li>Get sanction letter in minutes</li>
             </ul>
-            <p style="text-align: center;">
-                <a href="{ref_link}" style="display: inline-block; background: #667eea; color: white; padding: 15px 30px; text-decoration: none; border-radius: 5px; font-weight: bold;">
-                    Start Your Application →
+            <p style="text-align: center; margin: 25px 0 15px 0;">
+                <a href="{ref_link}" style="display: inline-block; background: #1a1a2e; color: white; padding: 14px 35px; text-decoration: none; border-radius: 6px; font-weight: 500;">
+                    Start Application
                 </a>
             </p>
-            <p style="font-size: 12px; color: #666;">This link is valid for 24 hours.</p>
+            <p style="font-size: 12px; color: #888; text-align: center; margin-bottom: 0;">This link expires in 24 hours</p>
         </div>
+        <p style="font-size: 11px; color: #999; text-align: center; margin-top: 15px;">NBFC Loans | support@nbfc-loans.com</p>
     </body>
     </html>
     """
