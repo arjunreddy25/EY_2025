@@ -51,7 +51,7 @@ interface UseChatOptions {
 
 export function useChat(options: UseChatOptions = {}) {
   const {
-    wsUrl = 'ws://localhost:8000/ws/chat',
+    wsUrl = import.meta.env.VITE_WS_URL || 'ws://localhost:8000/ws/chat',
     initialSessionId,
     onNavigate,
   } = options;
@@ -284,7 +284,7 @@ export function useChat(options: UseChatOptions = {}) {
           const formData = new FormData();
           formData.append('file', file);
 
-          const uploadResponse = await fetch('http://localhost:8000/upload/salary-slip', {
+          const uploadResponse = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:8000'}/upload/salary-slip`, {
             method: 'POST',
             body: formData,
           });

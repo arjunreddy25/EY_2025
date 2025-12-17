@@ -3,7 +3,7 @@ import { BrowserRouter, Routes, Route, useSearchParams, useNavigate, useParams }
 import { ChatLayout } from './components/ChatLayout';
 import { CRMDashboard } from './components/CRMDashboard';
 
-const API_BASE = 'http://localhost:8000';
+const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 
 function RefVerifier() {
   const [searchParams] = useSearchParams();
