@@ -30,7 +30,16 @@ from db_neon import (
     create_customer_link,
     get_all_links,
     verify_customer_link,
-    delete_customer
+    delete_customer,
+    # Chat session operations
+    create_chat_session,
+    get_chat_sessions,
+    get_chat_sessions_by_ids,
+    get_chat_session,
+    save_chat_message,
+    update_session_title,
+    delete_chat_session,
+    link_sessions_to_customer
 )
 
 load_dotenv()
@@ -90,6 +99,33 @@ class EmailResult(BaseModel):
     email: str
     status: str
     message: Optional[str] = None
+
+
+# Chat Session Models
+class CreateSessionRequest(BaseModel):
+    session_id: str
+    customer_id: Optional[str] = None
+    title: str = "New Chat"
+
+
+class SaveMessageRequest(BaseModel):
+    role: str  # 'user' or 'assistant'
+    content: str
+    tool_calls: Optional[List[dict]] = None
+
+
+class SessionIdsRequest(BaseModel):
+    session_ids: List[str]
+
+
+class ChatSessionResponse(BaseModel):
+    session_id: str
+    customer_id: Optional[str] = None
+    title: str
+    created_at: str
+    updated_at: str
+    message_count: int
+    last_message_preview: Optional[str] = None
 
 
 def send_smtp_email(to_email: str, customer_name: str, ref_link: str, pre_approved_limit: float, subject: str) -> dict:
@@ -417,6 +453,121 @@ async def list_all_links():
         }
         for link in links
     ]
+
+
+# ============================================
+# Chat Session Endpoints
+# ============================================
+
+@app.get("/chat/sessions")
+async def list_chat_sessions(customer_id: Optional[str] = None):
+    """
+    List chat sessions.
+    - If customer_id is provided, returns sessions for that customer.
+    - Otherwise returns all sessions (for admin/debug).
+    """
+    sessions = get_chat_sessions(customer_id)
+    return [
+        {
+            **s,
+            "created_at": s["created_at"].isoformat() if s.get("created_at") else None,
+            "updated_at": s["updated_at"].isoformat() if s.get("updated_at") else None,
+        }
+        for s in sessions
+    ]
+
+
+@app.post("/chat/sessions/by-ids")
+async def get_sessions_by_ids(request: SessionIdsRequest):
+    """
+    Get chat sessions by a list of session IDs.
+    Used by anonymous users who track session IDs in localStorage.
+    """
+    sessions = get_chat_sessions_by_ids(request.session_ids)
+    return [
+        {
+            **s,
+            "created_at": s["created_at"].isoformat() if s.get("created_at") else None,
+            "updated_at": s["updated_at"].isoformat() if s.get("updated_at") else None,
+        }
+        for s in sessions
+    ]
+
+
+@app.post("/chat/sessions")
+async def create_session(request: CreateSessionRequest):
+    """Create a new chat session."""
+    session = create_chat_session(
+        session_id=request.session_id,
+        customer_id=request.customer_id,
+        title=request.title
+    )
+    if not session:
+        raise HTTPException(status_code=500, detail="Failed to create session")
+    
+    return {
+        **session,
+        "created_at": session["created_at"].isoformat() if session.get("created_at") else None,
+        "updated_at": session["updated_at"].isoformat() if session.get("updated_at") else None,
+    }
+
+
+@app.get("/chat/sessions/{session_id}")
+async def get_session_with_messages(session_id: str):
+    """Get a chat session with all its messages."""
+    session = get_chat_session(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    
+    return {
+        **session,
+        "created_at": session["created_at"].isoformat() if session.get("created_at") else None,
+        "updated_at": session["updated_at"].isoformat() if session.get("updated_at") else None,
+        "messages": [
+            {
+                **m,
+                "created_at": m["created_at"].isoformat() if m.get("created_at") else None,
+            }
+            for m in session.get("messages", [])
+        ]
+    }
+
+
+@app.delete("/chat/sessions/{session_id}")
+async def delete_session(session_id: str):
+    """Delete a chat session and all its messages."""
+    success = delete_chat_session(session_id)
+    if not success:
+        raise HTTPException(status_code=500, detail="Failed to delete session")
+    return {"status": "deleted", "session_id": session_id}
+
+
+@app.post("/chat/sessions/{session_id}/messages")
+async def save_message(session_id: str, request: SaveMessageRequest):
+    """Save a message to a chat session."""
+    message = save_chat_message(
+        session_id=session_id,
+        role=request.role,
+        content=request.content,
+        tool_calls=request.tool_calls
+    )
+    if not message:
+        raise HTTPException(status_code=500, detail="Failed to save message")
+    
+    return {
+        **message,
+        "created_at": message["created_at"].isoformat() if message.get("created_at") else None,
+    }
+
+
+@app.post("/chat/sessions/link-to-customer")
+async def link_sessions_to_customer_endpoint(customer_id: str, request: SessionIdsRequest):
+    """
+    Link anonymous sessions to a customer after verification.
+    Used when a user verifies via ref link and we want to associate their previous chats.
+    """
+    count = link_sessions_to_customer(request.session_ids, customer_id)
+    return {"linked_count": count, "customer_id": customer_id}
 
 
 @app.post("/chat")

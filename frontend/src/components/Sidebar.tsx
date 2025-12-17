@@ -25,6 +25,7 @@ interface SidebarProps {
   currentSessionId: string;
   onNewChat: () => void;
   onSelectSession: (session: ChatSession) => void;
+  onDeleteSession?: (sessionId: string) => void;
   theme: 'light' | 'dark';
   onToggleTheme: () => void;
   user?: { email: string } | null;
@@ -38,6 +39,7 @@ export function Sidebar({
   currentSessionId,
   onNewChat,
   onSelectSession,
+  onDeleteSession,
   theme,
   onToggleTheme,
   user,
@@ -131,7 +133,13 @@ export function Sidebar({
                               {session.createdAt.toLocaleDateString()}
                             </span>
                           </div>
-                          <Trash2 className="size-4 shrink-0 opacity-0 transition-opacity group-hover:opacity-100 text-muted-foreground hover:text-destructive" />
+                          <Trash2
+                            className="size-4 shrink-0 opacity-0 transition-opacity group-hover:opacity-100 text-muted-foreground hover:text-destructive"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onDeleteSession?.(session.id);
+                            }}
+                          />
                         </Button>
                       ))}
                     </div>

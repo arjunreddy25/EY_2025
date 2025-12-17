@@ -282,6 +282,235 @@ def get_all_links() -> list:
             return [dict(link) for link in links]
 
 
+# ============================================
+# Chat Session Operations
+# ============================================
+
+def create_chat_session(session_id: str, customer_id: Optional[str] = None, title: str = "New Chat") -> Optional[Dict[str, Any]]:
+    """Create a new chat session."""
+    try:
+        with get_db() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO chat_sessions (session_id, customer_id, title)
+                    VALUES (%s, %s, %s)
+                    ON CONFLICT (session_id) DO NOTHING
+                    RETURNING session_id, customer_id, title, created_at, updated_at, message_count, last_message_preview
+                    """,
+                    (session_id, customer_id, title)
+                )
+                result = cur.fetchone()
+                return dict(result) if result else None
+    except Exception as e:
+        print(f"❌ Error creating chat session: {e}")
+        return None
+
+
+def get_chat_sessions(customer_id: Optional[str] = None, limit: int = 50) -> list:
+    """
+    Get chat sessions, optionally filtered by customer_id.
+    For anonymous users (customer_id=None), fetches sessions without customer association.
+    """
+    with get_db() as conn:
+        with conn.cursor() as cur:
+            if customer_id:
+                cur.execute(
+                    """
+                    SELECT session_id, customer_id, title, created_at, updated_at, message_count, last_message_preview
+                    FROM chat_sessions
+                    WHERE customer_id = %s
+                    ORDER BY updated_at DESC
+                    LIMIT %s
+                    """,
+                    (customer_id, limit)
+                )
+            else:
+                cur.execute(
+                    """
+                    SELECT session_id, customer_id, title, created_at, updated_at, message_count, last_message_preview
+                    FROM chat_sessions
+                    ORDER BY updated_at DESC
+                    LIMIT %s
+                    """,
+                    (limit,)
+                )
+            sessions = cur.fetchall()
+            return [dict(s) for s in sessions]
+
+
+def get_chat_sessions_by_ids(session_ids: list) -> list:
+    """Get chat sessions by a list of session IDs (for anonymous user localStorage tracking)."""
+    if not session_ids:
+        return []
+    
+    with get_db() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT session_id, customer_id, title, created_at, updated_at, message_count, last_message_preview
+                FROM chat_sessions
+                WHERE session_id = ANY(%s)
+                ORDER BY updated_at DESC
+                """,
+                (session_ids,)
+            )
+            sessions = cur.fetchall()
+            return [dict(s) for s in sessions]
+
+
+def get_chat_session(session_id: str) -> Optional[Dict[str, Any]]:
+    """Get a single chat session with its messages."""
+    with get_db() as conn:
+        with conn.cursor() as cur:
+            # Get session info
+            cur.execute(
+                """
+                SELECT session_id, customer_id, title, created_at, updated_at, message_count, last_message_preview
+                FROM chat_sessions
+                WHERE session_id = %s
+                """,
+                (session_id,)
+            )
+            session = cur.fetchone()
+            
+            if not session:
+                return None
+            
+            session = dict(session)
+            
+            # Get messages
+            cur.execute(
+                """
+                SELECT id, role, content, tool_calls, created_at
+                FROM chat_messages
+                WHERE session_id = %s
+                ORDER BY created_at ASC
+                """,
+                (session_id,)
+            )
+            messages = cur.fetchall()
+            session['messages'] = [dict(m) for m in messages]
+            
+            return session
+
+
+def save_chat_message(session_id: str, role: str, content: str, tool_calls: Optional[list] = None) -> Optional[Dict[str, Any]]:
+    """
+    Save a chat message and update the session's metadata.
+    Creates the session if it doesn't exist.
+    """
+    try:
+        with get_db() as conn:
+            with conn.cursor() as cur:
+                # Ensure session exists
+                cur.execute(
+                    """
+                    INSERT INTO chat_sessions (session_id, title)
+                    VALUES (%s, %s)
+                    ON CONFLICT (session_id) DO NOTHING
+                    """,
+                    (session_id, content[:50] + "..." if len(content) > 50 else content)
+                )
+                
+                # Insert message
+                cur.execute(
+                    """
+                    INSERT INTO chat_messages (session_id, role, content, tool_calls)
+                    VALUES (%s, %s, %s, %s)
+                    RETURNING id, role, content, tool_calls, created_at
+                    """,
+                    (session_id, role, content, json.dumps(tool_calls) if tool_calls else None)
+                )
+                message = cur.fetchone()
+                
+                # Update session metadata
+                preview = content[:100] + "..." if len(content) > 100 else content
+                cur.execute(
+                    """
+                    UPDATE chat_sessions 
+                    SET message_count = message_count + 1,
+                        last_message_preview = %s,
+                        updated_at = NOW()
+                    WHERE session_id = %s
+                    """,
+                    (preview, session_id)
+                )
+                
+                # Update title from first user message if it's "New Chat"
+                if role == 'user':
+                    cur.execute(
+                        """
+                        UPDATE chat_sessions 
+                        SET title = %s
+                        WHERE session_id = %s AND (title = 'New Chat' OR title IS NULL)
+                        """,
+                        (content[:50] + "..." if len(content) > 50 else content, session_id)
+                    )
+                
+                return dict(message) if message else None
+    except Exception as e:
+        print(f"❌ Error saving chat message: {e}")
+        return None
+
+
+def update_session_title(session_id: str, title: str) -> bool:
+    """Update the title of a chat session."""
+    try:
+        with get_db() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    UPDATE chat_sessions 
+                    SET title = %s, updated_at = NOW()
+                    WHERE session_id = %s
+                    """,
+                    (title, session_id)
+                )
+                return True
+    except Exception as e:
+        print(f"❌ Error updating session title: {e}")
+        return False
+
+
+def delete_chat_session(session_id: str) -> bool:
+    """Delete a chat session and all its messages."""
+    try:
+        with get_db() as conn:
+            with conn.cursor() as cur:
+                # Delete messages first (if no CASCADE)
+                cur.execute("DELETE FROM chat_messages WHERE session_id = %s", (session_id,))
+                # Delete session
+                cur.execute("DELETE FROM chat_sessions WHERE session_id = %s", (session_id,))
+                return True
+    except Exception as e:
+        print(f"❌ Error deleting chat session: {e}")
+        return False
+
+
+def link_sessions_to_customer(session_ids: list, customer_id: str) -> int:
+    """Link anonymous sessions to a customer (after they verify via ref link)."""
+    if not session_ids:
+        return 0
+    
+    try:
+        with get_db() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    UPDATE chat_sessions 
+                    SET customer_id = %s, updated_at = NOW()
+                    WHERE session_id = ANY(%s) AND customer_id IS NULL
+                    """,
+                    (customer_id, session_ids)
+                )
+                return cur.rowcount
+    except Exception as e:
+        print(f"❌ Error linking sessions to customer: {e}")
+        return 0
+
+
 if __name__ == "__main__":
     # Test the connection
     test_connection()
+

@@ -1,5 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 
+const API_BASE = 'http://localhost:8000';
+
 export interface Message {
   id: string;
   role: 'user' | 'assistant';
@@ -20,29 +22,178 @@ export interface ChatSession {
   id: string;
   title: string;
   createdAt: Date;
-  messages: Message[];
+  updatedAt?: Date;
+  messageCount?: number;
+  lastMessagePreview?: string;
+  messages?: Message[];
 }
 
 interface UseChatOptions {
   wsUrl?: string;
-  sessionId?: string;
+  initialSessionId?: string;
+}
+
+// Helper to get/set anonymous session IDs in localStorage
+function getStoredSessionIds(): string[] {
+  try {
+    const ids = localStorage.getItem('chat_session_ids');
+    return ids ? JSON.parse(ids) : [];
+  } catch {
+    return [];
+  }
+}
+
+function addStoredSessionId(sessionId: string): void {
+  const ids = getStoredSessionIds();
+  if (!ids.includes(sessionId)) {
+    ids.unshift(sessionId);
+    localStorage.setItem('chat_session_ids', JSON.stringify(ids.slice(0, 50)));
+  }
+}
+
+function removeStoredSessionId(sessionId: string): void {
+  const ids = getStoredSessionIds().filter(id => id !== sessionId);
+  localStorage.setItem('chat_session_ids', JSON.stringify(ids));
 }
 
 export function useChat(options: UseChatOptions = {}) {
   const { 
     wsUrl = 'ws://localhost:8000/ws/chat',
-    sessionId = `session_${Date.now()}`
+    initialSessionId
   } = options;
 
   const [messages, setMessages] = useState<Message[]>([]);
   const [isConnected, setIsConnected] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const [isLoadingSessions, setIsLoadingSessions] = useState(true);
   const [currentToolCall, setCurrentToolCall] = useState<string | null>(null);
   const [sessions, setSessions] = useState<ChatSession[]>([]);
-  const [currentSessionId, setCurrentSessionId] = useState(sessionId);
+  const [currentSessionId, setCurrentSessionId] = useState(initialSessionId || `session_${Date.now()}`);
   
   const wsRef = useRef<WebSocket | null>(null);
   const currentMessageRef = useRef<string>('');
+  const pendingAssistantMessageRef = useRef<string>('');
+
+  // Get customer info from localStorage
+  const getCustomerInfo = useCallback(() => {
+    try {
+      const customerStr = localStorage.getItem('customer');
+      if (customerStr) {
+        return JSON.parse(customerStr);
+      }
+    } catch (e) {
+      console.warn('Could not parse customer from localStorage:', e);
+    }
+    return null;
+  }, []);
+
+  // Fetch sessions from API
+  const fetchSessions = useCallback(async () => {
+    setIsLoadingSessions(true);
+    try {
+      const customer = getCustomerInfo();
+
+      if (customer?.customer_id) {
+        // Logged-in user: fetch by customer_id
+        const res = await fetch(`${API_BASE}/chat/sessions?customer_id=${customer.customer_id}`);
+        if (res.ok) {
+          const data = await res.json();
+          setSessions(data.map((s: any) => ({
+            id: s.session_id,
+            title: s.title || 'New Chat',
+            createdAt: new Date(s.created_at),
+            updatedAt: s.updated_at ? new Date(s.updated_at) : undefined,
+            messageCount: s.message_count,
+            lastMessagePreview: s.last_message_preview
+          })));
+        }
+      } else {
+        // Anonymous user: fetch by stored session IDs
+        const storedIds = getStoredSessionIds();
+        if (storedIds.length > 0) {
+          const res = await fetch(`${API_BASE}/chat/sessions/by-ids`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ session_ids: storedIds })
+          });
+          if (res.ok) {
+            const data = await res.json();
+            setSessions(data.map((s: any) => ({
+              id: s.session_id,
+              title: s.title || 'New Chat',
+              createdAt: new Date(s.created_at),
+              updatedAt: s.updated_at ? new Date(s.updated_at) : undefined,
+              messageCount: s.message_count,
+              lastMessagePreview: s.last_message_preview
+            })));
+          }
+        } else {
+          setSessions([]);
+        }
+      }
+    } catch (e) {
+      console.error('Error fetching sessions:', e);
+    } finally {
+      setIsLoadingSessions(false);
+    }
+  }, [getCustomerInfo]);
+
+  // Save message to API
+  const saveMessageToAPI = useCallback(async (sessionId: string, role: string, content: string, toolCalls?: ToolCall[]) => {
+    try {
+      await fetch(`${API_BASE}/chat/sessions/${sessionId}/messages`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ role, content, tool_calls: toolCalls })
+      });
+      // Refresh sessions to update sidebar
+      fetchSessions();
+    } catch (e) {
+      console.error('Error saving message:', e);
+    }
+  }, [fetchSessions]);
+
+  // Create session in API
+  const createSessionInAPI = useCallback(async (sessionId: string, title: string = 'New Chat') => {
+    try {
+      const customer = getCustomerInfo();
+      await fetch(`${API_BASE}/chat/sessions`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          session_id: sessionId,
+          customer_id: customer?.customer_id || null,
+          title
+        })
+      });
+      // Track in localStorage for anonymous users
+      addStoredSessionId(sessionId);
+    } catch (e) {
+      console.error('Error creating session:', e);
+    }
+  }, [getCustomerInfo]);
+
+  // Load session messages from API
+  const loadSessionMessages = useCallback(async (sessionId: string) => {
+    try {
+      const res = await fetch(`${API_BASE}/chat/sessions/${sessionId}`);
+      if (res.ok) {
+        const data = await res.json();
+        const loadedMessages: Message[] = (data.messages || []).map((m: any) => ({
+          id: `msg_${m.id}`,
+          role: m.role,
+          content: m.content,
+          timestamp: new Date(m.created_at),
+          toolCalls: m.tool_calls || []
+        }));
+        setMessages(loadedMessages);
+        return loadedMessages;
+      }
+    } catch (e) {
+      console.error('Error loading session messages:', e);
+    }
+    return [];
+  }, []);
 
   // Connect to WebSocket
   const connect = useCallback(() => {
@@ -67,11 +218,11 @@ export function useChat(options: UseChatOptions = {}) {
       
       switch (data.type) {
         case 'ack':
-          // Message acknowledged, waiting for response
           break;
           
         case 'content_start':
           currentMessageRef.current = '';
+          pendingAssistantMessageRef.current = '';
           setMessages(prev => [
             ...prev,
             {
@@ -87,6 +238,7 @@ export function useChat(options: UseChatOptions = {}) {
           
         case 'content':
           currentMessageRef.current += data.data;
+          pendingAssistantMessageRef.current = currentMessageRef.current;
           setMessages(prev => {
             const updated = [...prev];
             const lastMsg = updated[updated.length - 1];
@@ -139,6 +291,11 @@ export function useChat(options: UseChatOptions = {}) {
             const lastMsg = updated[updated.length - 1];
             if (lastMsg?.role === 'assistant') {
               lastMsg.isStreaming = false;
+              // Save assistant message to API
+              if (pendingAssistantMessageRef.current) {
+                saveMessageToAPI(currentSessionId, 'assistant', pendingAssistantMessageRef.current, lastMsg.toolCalls);
+                pendingAssistantMessageRef.current = '';
+              }
             }
             return updated;
           });
@@ -160,7 +317,7 @@ export function useChat(options: UseChatOptions = {}) {
     };
 
     wsRef.current = ws;
-  }, [wsUrl, currentSessionId]);
+  }, [wsUrl, currentSessionId, saveMessageToAPI]);
 
   // Disconnect from WebSocket
   const disconnect = useCallback(() => {
@@ -171,75 +328,96 @@ export function useChat(options: UseChatOptions = {}) {
   }, []);
 
   // Send a message
-  const sendMessage = useCallback((content: string, file?: File) => {
+  const sendMessage = useCallback(async (content: string, file?: File) => {
     if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
       connect();
       setTimeout(() => sendMessage(content, file), 500);
       return;
     }
 
-    // Add user message
+    const messageContent = file ? `${content}\n\n[Attached: ${file.name}]` : content;
+
+    // Add user message to UI
     const userMessage: Message = {
       id: `msg_${Date.now()}`,
       role: 'user',
-      content: file ? `${content}\n\n[Attached: ${file.name}]` : content,
+      content: messageContent,
       timestamp: new Date()
     };
     
     setMessages(prev => [...prev, userMessage]);
     setIsLoading(true);
 
-    // Get customer info from localStorage (set by ref link auth)
-    let customer_id: string | null = null;
-    let customer_name: string | null = null;
+    // Save user message to API
+    await saveMessageToAPI(currentSessionId, 'user', messageContent);
 
-    try {
-      const customerStr = localStorage.getItem('customer');
-      if (customerStr) {
-        const customer = JSON.parse(customerStr);
-        customer_id = customer.customer_id;
-        customer_name = customer.name;
-      }
-    } catch (e) {
-      console.warn('Could not parse customer from localStorage:', e);
-    }
+    // Get customer info
+    const customer = getCustomerInfo();
 
-    // Send to WebSocket with customer context
+    // Send to WebSocket
     wsRef.current.send(JSON.stringify({
       message: content,
-      customer_id,
-      customer_name
+      customer_id: customer?.customer_id || null,
+      customer_name: customer?.name || null
     }));
-  }, [connect]);
+  }, [connect, currentSessionId, saveMessageToAPI, getCustomerInfo]);
 
   // Create new session
-  const newSession = useCallback(() => {
-    // Save current session if it has messages
-    if (messages.length > 0) {
-      const session: ChatSession = {
-        id: currentSessionId,
-        title: messages[0]?.content.slice(0, 30) + '...' || 'New Chat',
-        createdAt: new Date(),
-        messages: [...messages]
-      };
-      setSessions(prev => [session, ...prev]);
-    }
-
-    // Reset for new session
+  const newSession = useCallback(async () => {
     const newId = `session_${Date.now()}`;
+
+    // Create in API
+    await createSessionInAPI(newId, 'New Chat');
+
+    // Update state
     setCurrentSessionId(newId);
     setMessages([]);
     disconnect();
-  }, [messages, currentSessionId, disconnect]);
+
+    // Refresh sessions list
+    await fetchSessions();
+
+    return newId;
+  }, [disconnect, createSessionInAPI, fetchSessions]);
 
   // Load a session
-  const loadSession = useCallback((session: ChatSession) => {
-    setCurrentSessionId(session.id);
-    setMessages(session.messages);
+  const loadSession = useCallback(async (session: ChatSession) => {
     disconnect();
-  }, [disconnect]);
+    setCurrentSessionId(session.id);
+    await loadSessionMessages(session.id);
+  }, [disconnect, loadSessionMessages]);
 
-  // Auto-connect on mount
+  // Delete a session
+  const deleteSession = useCallback(async (sessionId: string) => {
+    try {
+      await fetch(`${API_BASE}/chat/sessions/${sessionId}`, { method: 'DELETE' });
+      removeStoredSessionId(sessionId);
+
+      // If deleting current session, create new one
+      if (sessionId === currentSessionId) {
+        await newSession();
+      } else {
+        await fetchSessions();
+      }
+    } catch (e) {
+      console.error('Error deleting session:', e);
+    }
+  }, [currentSessionId, newSession, fetchSessions]);
+
+  // Load initial session if provided
+  useEffect(() => {
+    if (initialSessionId) {
+      loadSessionMessages(initialSessionId);
+      setCurrentSessionId(initialSessionId);
+    }
+  }, [initialSessionId, loadSessionMessages]);
+
+  // Fetch sessions on mount
+  useEffect(() => {
+    fetchSessions();
+  }, [fetchSessions]);
+
+  // Auto-connect on session change
   useEffect(() => {
     connect();
     return () => disconnect();
@@ -249,12 +427,15 @@ export function useChat(options: UseChatOptions = {}) {
     messages,
     isConnected,
     isLoading,
+    isLoadingSessions,
     currentToolCall,
     sessions,
     currentSessionId,
     sendMessage,
     newSession,
     loadSession,
+    deleteSession,
+    fetchSessions,
     connect,
     disconnect
   };

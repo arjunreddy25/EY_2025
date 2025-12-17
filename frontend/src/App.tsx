@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react';
-import { BrowserRouter, Routes, Route, useSearchParams, useNavigate } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, useSearchParams, useNavigate, useParams } from 'react-router-dom';
 import { ChatLayout } from './components/ChatLayout';
 import { CRMDashboard } from './components/CRMDashboard';
+
+const API_BASE = 'http://localhost:8000';
 
 function RefVerifier() {
   const [searchParams] = useSearchParams();
@@ -15,12 +17,12 @@ function RefVerifier() {
       setIsVerifying(true);
 
       // Verify ref and get customer identity
-      fetch(`http://localhost:8000/auth/verify-ref?ref=${ref}`)
+      fetch(`${API_BASE}/auth/verify-ref?ref=${ref}`)
         .then(res => {
           if (!res.ok) throw new Error('Invalid or expired link');
           return res.json();
         })
-        .then(data => {
+        .then(async (data) => {
           if (data.customer_id) {
             // Store customer identity
             localStorage.setItem('customer', JSON.stringify(data));
@@ -30,8 +32,44 @@ function RefVerifier() {
               customer_id: data.customer_id
             }));
 
-            // Navigate to clean URL
-            navigate('/', { replace: true });
+            // Link any anonymous sessions to this customer
+            const storedIds = JSON.parse(localStorage.getItem('chat_session_ids') || '[]');
+            if (storedIds.length > 0) {
+              try {
+                await fetch(`${API_BASE}/chat/sessions/link-to-customer?customer_id=${data.customer_id}`, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ session_ids: storedIds })
+                });
+              } catch (e) {
+                console.warn('Could not link sessions to customer:', e);
+              }
+            }
+
+            // Create a new session for this verified customer
+            const newSessionId = `session_${Date.now()}`;
+            try {
+              await fetch(`${API_BASE}/chat/sessions`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  session_id: newSessionId,
+                  customer_id: data.customer_id,
+                  title: 'New Chat'
+                })
+              });
+              // Track in localStorage
+              const ids = JSON.parse(localStorage.getItem('chat_session_ids') || '[]');
+              if (!ids.includes(newSessionId)) {
+                ids.unshift(newSessionId);
+                localStorage.setItem('chat_session_ids', JSON.stringify(ids.slice(0, 50)));
+              }
+            } catch (e) {
+              console.warn('Could not create session:', e);
+            }
+
+            // Navigate to the new chat
+            navigate(`/chat/${newSessionId}`, { replace: true });
           }
         })
         .catch(err => {
@@ -58,11 +96,17 @@ function RefVerifier() {
   return <ChatLayout />;
 }
 
+function ChatWithId() {
+  const { chatId } = useParams<{ chatId: string }>();
+  return <ChatLayout chatId={chatId} />;
+}
+
 function App() {
   return (
     <BrowserRouter>
       <Routes>
         <Route path="/" element={<RefVerifier />} />
+        <Route path="/chat/:chatId" element={<ChatWithId />} />
         <Route path="/crm" element={<CRMDashboard />} />
       </Routes>
     </BrowserRouter>
@@ -70,3 +114,4 @@ function App() {
 }
 
 export default App;
+

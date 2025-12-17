@@ -12,7 +12,7 @@ interface User {
   customer_id?: string;
 }
 
-export function ChatLayout() {
+export function ChatLayout({ chatId }: { chatId?: string } = {}) {
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [user, setUser] = useState<User | null>(() => {
     // Check for customer from ref link first (set by App.tsx)
@@ -44,7 +44,8 @@ export function ChatLayout() {
     sendMessage,
     newSession,
     loadSession,
-  } = useChat();
+    deleteSession,
+  } = useChat({ initialSessionId: chatId });
 
   const handleSuggestionClick = useCallback((suggestion: string) => {
     sendMessage(suggestion);
@@ -90,6 +91,7 @@ export function ChatLayout() {
         currentSessionId={currentSessionId}
         onNewChat={newSession}
         onSelectSession={loadSession}
+        onDeleteSession={deleteSession}
         theme={resolvedTheme}
         onToggleTheme={toggleTheme}
         user={user}
