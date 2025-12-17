@@ -31,72 +31,11 @@ function ToolCallBadge({ toolCall }: { toolCall: ToolCall }) {
   );
 }
 
-// Check if message contains sanction letter indicator
-function hasSanctionLetter(content: string): boolean {
-  const sanctionKeywords = [
-    'sanction letter',
-    'sanctioned',
-    'loan approved',
-    'approval letter',
-    'loan sanction',
-  ];
-  const lowerContent = content.toLowerCase();
-  return sanctionKeywords.some(keyword => lowerContent.includes(keyword));
-}
 
-// Generate and download PDF sanction letter
-function downloadSanctionLetter(content: string) {
-  // Create a simple HTML document for the PDF
-  const htmlContent = `
-    <!DOCTYPE html>
-    <html>
-    <head>
-      <title>Loan Sanction Letter</title>
-      <style>
-        body { font-family: Arial, sans-serif; padding: 40px; max-width: 800px; margin: 0 auto; }
-        .header { text-align: center; border-bottom: 2px solid #333; padding-bottom: 20px; margin-bottom: 30px; }
-        .header h1 { color: #1a1a1a; margin: 0; }
-        .header p { color: #666; margin: 5px 0; }
-        .content { line-height: 1.8; white-space: pre-wrap; }
-        .footer { margin-top: 50px; border-top: 1px solid #ccc; padding-top: 20px; text-align: center; color: #666; font-size: 12px; }
-        .stamp { margin-top: 30px; text-align: right; }
-      </style>
-    </head>
-    <body>
-      <div class="header">
-        <h1>🏦 NBFC Personal Loan</h1>
-        <p>Sanction Letter</p>
-        <p>Date: ${new Date().toLocaleDateString('en-IN', { day: '2-digit', month: 'long', year: 'numeric' })}</p>
-      </div>
-      <div class="content">${content.replace(/\*\*/g, '').replace(/\n/g, '<br>')}</div>
-      <div class="stamp">
-        <p><strong>Authorized Signatory</strong></p>
-        <p>NBFC Loans Division</p>
-      </div>
-      <div class="footer">
-        <p>This is a computer-generated document. No signature required.</p>
-        <p>For queries, contact: support@nbfc-loans.com | 1800-XXX-XXXX</p>
-      </div>
-    </body>
-    </html>
-  `;
-
-  // Open print dialog for PDF generation
-  const printWindow = window.open('', '_blank');
-  if (printWindow) {
-    printWindow.document.write(htmlContent);
-    printWindow.document.close();
-    printWindow.focus();
-    setTimeout(() => {
-      printWindow.print();
-    }, 250);
-  }
-}
 
 export function MessageBubble({ message }: MessageBubbleProps) {
   const [copied, setCopied] = useState(false);
   const isUser = message.role === 'user';
-  const showPdfButton = !isUser && hasSanctionLetter(message.content);
 
   const handleCopy = async () => {
     await navigator.clipboard.writeText(message.content);
@@ -126,14 +65,22 @@ export function MessageBubble({ message }: MessageBubbleProps) {
               : "bg-muted text-foreground"
           )}
         >
-          {/* Tool calls */}
-          {message.toolCalls && message.toolCalls.length > 0 && (
-            <div className="mb-3 flex flex-wrap gap-2">
-              {message.toolCalls.map((tc, idx) => (
-                <ToolCallBadge key={idx} toolCall={tc} />
-              ))}
-            </div>
-          )}
+          {/* Tool calls - only show during streaming, filter out internal delegation tools */}
+          {message.isStreaming && message.toolCalls && message.toolCalls.length > 0 && (() => {
+            // Filter out internal agent delegation tools
+            const visibleTools = message.toolCalls.filter(tc =>
+              !tc.tool.includes('transfer_task') &&
+              !tc.tool.includes('delegate') &&
+              tc.tool !== 'transfer_task_to_member'
+            );
+            return visibleTools.length > 0 ? (
+              <div className="mb-3 flex flex-wrap gap-2">
+                {visibleTools.map((tc, idx) => (
+                  <ToolCallBadge key={idx} toolCall={tc} />
+                ))}
+              </div>
+            ) : null;
+          })()}
 
           {/* Message content or skeleton */}
           {message.isStreaming && !message.content ? (
@@ -176,15 +123,24 @@ export function MessageBubble({ message }: MessageBubbleProps) {
               )}
             </Button>
 
-            {showPdfButton && (
+            {message.pdfUrl && (
               <Button
                 variant="ghost"
                 size="sm"
-                onClick={() => downloadSanctionLetter(message.content)}
+                onClick={() => {
+                  // Create a hidden link and trigger download
+                  const link = document.createElement('a');
+                  link.href = message.pdfUrl!;
+                  link.download = message.letterId ? `${message.letterId}.pdf` : 'sanction_letter.pdf';
+                  link.target = '_blank';
+                  document.body.appendChild(link);
+                  link.click();
+                  document.body.removeChild(link);
+                }}
                 className="h-7 gap-1.5 text-xs text-muted-foreground hover:text-foreground"
               >
                 <Download className="size-3" />
-                Download PDF
+                Download Sanction Letter
               </Button>
             )}
           </div>

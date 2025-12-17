@@ -4,7 +4,15 @@ import json
 import os
 import requests
 from datetime import datetime
-from db_neon import get_all_customers
+from db_neon import get_all_customers, create_loan_application
+from io import BytesIO
+from reportlab.lib.pagesizes import A4
+from reportlab.lib.units import inch, cm
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+from reportlab.lib import colors
+from s3_utils import upload_file_to_s3
 
 # Load customer data from NeonDB
 def load_customer_data():
@@ -287,6 +295,7 @@ def generate_sanction_letter(customer_id: str, loan_amount: float, tenure: int, 
     """
     Generate automated PDF sanction letter for approved loans.
     Includes customer name, approved amount, interest rate, tenure, EMI, and approval date.
+    Creates actual PDF file in sanction_letters/ directory.
     """
     
     customer = load_customer_data().get(customer_id)
@@ -297,7 +306,6 @@ def generate_sanction_letter(customer_id: str, loan_amount: float, tenure: int, 
         })
     
     # Determine interest rate based on credit score if not provided
-    # Ideally, interest_rate should come from underwriting response
     if interest_rate is None:
         credit_score = customer.get("credit_score", 700)
         interest_rate = calculate_interest_rate(credit_score)
@@ -309,18 +317,152 @@ def generate_sanction_letter(customer_id: str, loan_amount: float, tenure: int, 
     else:
         emi = (loan_amount * monthly_rate * (1 + monthly_rate) ** tenure) / ((1 + monthly_rate) ** tenure - 1)
     
+    total_payable = emi * tenure
+    total_interest = total_payable - loan_amount
+    
     approval_date = datetime.now().strftime("%Y-%m-%d")
+    letter_id = f"SL-{customer_id}-{datetime.now().strftime('%Y%m%d%H%M%S')}"
+    pdf_filename = f"{letter_id}.pdf"
+    
+    # Create sanction_letters directory if it doesn't exist
+    pdf_dir = "sanction_letters"
+    os.makedirs(pdf_dir, exist_ok=True)
+    pdf_path = os.path.join(pdf_dir, pdf_filename)
+    
+    # Create PDF
+    doc = SimpleDocTemplate(pdf_path, pagesize=A4, 
+                           rightMargin=1*inch, leftMargin=1*inch,
+                           topMargin=0.75*inch, bottomMargin=0.75*inch)
+    
+    styles = getSampleStyleSheet()
+    
+    # Custom styles
+    title_style = ParagraphStyle('Title', parent=styles['Heading1'],
+                                  fontSize=20, alignment=TA_CENTER, spaceAfter=6)
+    subtitle_style = ParagraphStyle('Subtitle', parent=styles['Normal'],
+                                     fontSize=12, alignment=TA_CENTER, textColor=colors.grey)
+    heading_style = ParagraphStyle('Heading', parent=styles['Heading2'],
+                                    fontSize=14, spaceBefore=20, spaceAfter=10)
+    body_style = ParagraphStyle('Body', parent=styles['Normal'],
+                                 fontSize=11, leading=16, spaceBefore=6)
+    footer_style = ParagraphStyle('Footer', parent=styles['Normal'],
+                                   fontSize=9, alignment=TA_CENTER, textColor=colors.grey)
+    
+    story = []
+    
+    # Header
+    story.append(Paragraph("🏦 NBFC Personal Loan", title_style))
+    story.append(Paragraph("SANCTION LETTER", subtitle_style))
+    story.append(Spacer(1, 0.3*inch))
+    
+    # Date and Reference
+    date_str = datetime.now().strftime("%d %B, %Y")
+    story.append(Paragraph(f"<b>Date:</b> {date_str}", body_style))
+    story.append(Paragraph(f"<b>Reference No:</b> {letter_id}", body_style))
+    story.append(Spacer(1, 0.2*inch))
+    
+    # Customer Details
+    story.append(Paragraph("Dear " + customer.get("name", "Valued Customer") + ",", body_style))
+    story.append(Spacer(1, 0.15*inch))
+    
+    # Congratulations message
+    story.append(Paragraph(
+        f"We are pleased to inform you that your Personal Loan application has been <b>APPROVED</b>. "
+        f"Based on our assessment of your credit profile and eligibility, we are delighted to sanction "
+        f"the following loan facility:",
+        body_style
+    ))
+    story.append(Spacer(1, 0.2*inch))
+    
+    # Loan Details Table
+    story.append(Paragraph("Loan Sanction Details", heading_style))
+    
+    table_data = [
+        ["Particulars", "Details"],
+        ["Customer Name", customer.get("name", "N/A")],
+        ["Customer ID", customer_id],
+        ["Sanctioned Amount", f"₹{loan_amount:,.2f}"],
+        ["Interest Rate (p.a.)", f"{interest_rate}%"],
+        ["Loan Tenure", f"{tenure} months"],
+        ["Monthly EMI", f"₹{emi:,.2f}"],
+        ["Total Interest Payable", f"₹{total_interest:,.2f}"],
+        ["Total Amount Payable", f"₹{total_payable:,.2f}"],
+        ["Sanction Date", date_str],
+    ]
+    
+    table = Table(table_data, colWidths=[2.5*inch, 3*inch])
+    table.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#1a1a2e')),
+        ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+        ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+        ('FONTSIZE', (0, 0), (-1, 0), 11),
+        ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+        ('TOPPADDING', (0, 0), (-1, 0), 12),
+        ('BACKGROUND', (0, 1), (-1, -1), colors.HexColor('#f8f9fa')),
+        ('FONTNAME', (0, 1), (0, -1), 'Helvetica-Bold'),
+        ('FONTSIZE', (0, 1), (-1, -1), 10),
+        ('BOTTOMPADDING', (0, 1), (-1, -1), 8),
+        ('TOPPADDING', (0, 1), (-1, -1), 8),
+        ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
+    ]))
+    story.append(table)
+    story.append(Spacer(1, 0.3*inch))
+    
+    # Terms
+    story.append(Paragraph("Terms & Conditions", heading_style))
+    terms = [
+        "This sanction is valid for 30 days from the date of issue.",
+        "Disbursement is subject to completion of documentation and verification.",
+        "The interest rate is subject to review and may be revised periodically.",
+        "Prepayment/foreclosure charges may apply as per bank policy.",
+        "All standard terms and conditions of the lending institution apply."
+    ]
+    for i, term in enumerate(terms, 1):
+        story.append(Paragraph(f"{i}. {term}", body_style))
+    
+    story.append(Spacer(1, 0.4*inch))
+    
+    # Signature
+    story.append(Paragraph("<b>For NBFC Loans Division</b>", body_style))
+    story.append(Spacer(1, 0.3*inch))
+    story.append(Paragraph("_______________________", body_style))
+    story.append(Paragraph("Authorized Signatory", body_style))
+    
+    story.append(Spacer(1, 0.5*inch))
+    
+    # Footer
+    story.append(Paragraph("This is a system-generated document. For queries, contact: support@nbfc-loans.com | 1800-XXX-XXXX", footer_style))
+    
+    # Build PDF
+    doc.build(story)
+    
+    s3_url = upload_file_to_s3(pdf_path, pdf_filename)
+    final_url = s3_url if s3_url else f"/sanction-letters/{pdf_filename}"
+    
+    # Save to Database
+    create_loan_application(
+        application_id=letter_id,
+        customer_id=customer_id,
+        amount=loan_amount,
+        tenure_months=tenure,
+        interest_rate=interest_rate,
+        monthly_emi=emi,
+        sanction_letter_url=final_url
+    )
     
     return json.dumps({
         "status": "generated",
-        "letter_id": f"SL-{customer_id}-{datetime.now().strftime('%Y%m%d')}",
+        "letter_id": letter_id,
         "customer_name": customer["name"],
         "customer_id": customer_id,
         "sanctioned_amount": round(loan_amount, 2),
         "interest_rate": f"{interest_rate}%",
         "tenure_months": tenure,
         "monthly_emi": round(emi, 2),
+        "total_interest": round(total_interest, 2),
+        "total_payable": round(total_payable, 2),
         "approval_date": approval_date,
-        "pdf_url": f"/sanction_letters/SL-{customer_id}-{datetime.now().strftime('%Y%m%d')}.pdf",
+        "pdf_url": final_url,
         "message": "Sanction letter PDF generated successfully"
     })

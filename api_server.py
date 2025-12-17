@@ -18,7 +18,7 @@ from dotenv import load_dotenv
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, FileResponse
 from pydantic import BaseModel
 from groq import Groq
 
@@ -242,6 +242,31 @@ manager = ConnectionManager()
 async def health_check():
     """Health check endpoint."""
     return HealthResponse(status="healthy", service="loan-sales-assistant")
+
+
+@app.get("/sanction-letters/{filename}")
+async def serve_sanction_letter(filename: str):
+    """Serve generated sanction letter PDF files for download."""
+    # Use absolute path from current working directory
+    import pathlib
+    base_dir = pathlib.Path(__file__).parent.resolve()
+    filepath = base_dir / "sanction_letters" / filename
+    
+    print(f"📄 Serving PDF: {filepath}")
+    
+    if not filepath.exists():
+        print(f"❌ PDF not found: {filepath}")
+        raise HTTPException(status_code=404, detail="Sanction letter not found")
+    
+    return FileResponse(
+        path=str(filepath),
+        media_type="application/pdf",
+        filename=filename,
+        headers={
+            "Content-Disposition": f"attachment; filename={filename}",
+            "Cache-Control": "no-cache"
+        }
+    )
 
 
 @app.get("/auth/verify-ref")
@@ -814,11 +839,28 @@ async def websocket_chat(websocket: WebSocket, session_id: str = "default_sessio
                     elif run_output_event.event == RunEvent.tool_call_completed:
                         agent_id = getattr(run_output_event, 'agent_id', 'unknown')
                         tool_name = getattr(run_output_event.tool, 'tool_name', 'unknown')
+                        result_str = getattr(run_output_event.tool, 'result', '')
+                        
                         await websocket.send_json({
                             "type": "member_tool_complete",
                             "agent": agent_id,
                             "tool": tool_name
                         })
+                        
+                        # Emit sanction letter event when PDF is generated
+                        if tool_name == 'generate_sanction_letter' and result_str:
+                            try:
+                                result_data = json.loads(result_str)
+                                if result_data.get("status") == "generated":
+                                    await websocket.send_json({
+                                        "type": "sanction_letter",
+                                        "letter_id": result_data.get("letter_id"),
+                                        "pdf_url": f"http://localhost:8000{result_data.get('pdf_url')}",
+                                        "customer_name": result_data.get("customer_name"),
+                                        "sanctioned_amount": result_data.get("sanctioned_amount")
+                                    })
+                            except json.JSONDecodeError:
+                                pass
                 
                 # Send completion signal
                 await websocket.send_json({

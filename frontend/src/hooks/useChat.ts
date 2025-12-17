@@ -22,6 +22,8 @@ export interface Message {
   timestamp: Date;
   isStreaming?: boolean;
   toolCalls?: ToolCall[];
+  pdfUrl?: string;
+  letterId?: string;
 }
 
 export interface ToolCall {
@@ -235,6 +237,19 @@ export function useChat(options: UseChatOptions = {}) {
             },
           ]);
           break;
+
+        case 'sanction_letter':
+          // Backend has generated a sanction letter PDF - attach URL to current message
+          setMessages((prev) => {
+            const updated = [...prev];
+            const lastMsg = updated[updated.length - 1];
+            if (lastMsg?.role === 'assistant') {
+              lastMsg.pdfUrl = data.pdf_url;
+              lastMsg.letterId = data.letter_id;
+            }
+            return updated;
+          });
+          break;
       }
     };
 
@@ -350,7 +365,7 @@ export function useChat(options: UseChatOptions = {}) {
             setCurrentSessionId(newId);
             setMessages([]);
             disconnect();
-            onNavigate?.(`/chat`);
+            onNavigate?.(`/`);
           }
         },
       });

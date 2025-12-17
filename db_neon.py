@@ -187,6 +187,63 @@ def get_existing_loans(customer_id: str) -> list:
             return [dict(loan) for loan in loans]
 
 
+
+# ============================================
+# Loan Application Operations
+# ============================================
+
+def create_loan_application_table_if_not_exists():
+    """Create loan_applications table if it doesn't exist."""
+    with get_db() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS loan_applications (
+                    application_id VARCHAR(50) PRIMARY KEY,
+                    customer_id VARCHAR(50) NOT NULL REFERENCES customers(customer_id),
+                    amount DECIMAL(15,2) NOT NULL,
+                    tenure_months INT NOT NULL,
+                    interest_rate DECIMAL(5,2) NOT NULL,
+                    monthly_emi DECIMAL(15,2) NOT NULL,
+                    status VARCHAR(20) DEFAULT 'SANCTIONED',
+                    sanction_letter_url TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            
+# Run table creation on module load (safe for dev)
+try:
+    create_loan_application_table_if_not_exists()
+except Exception as e:
+    print(f"⚠️ Warning: Could not check/create loan_applications table: {e}")
+
+
+def create_loan_application(
+    application_id: str,
+    customer_id: str,
+    amount: float,
+    tenure_months: int,
+    interest_rate: float,
+    monthly_emi: float,
+    sanction_letter_url: str
+) -> bool:
+    """Save a new loan application/sanction."""
+    try:
+        with get_db() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO loan_applications 
+                    (application_id, customer_id, amount, tenure_months, interest_rate, monthly_emi, sanction_letter_url)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s)
+                    """,
+                    (application_id, customer_id, amount, tenure_months, interest_rate, monthly_emi, sanction_letter_url)
+                )
+                return True
+    except Exception as e:
+        print(f"❌ Error creating loan application: {e}")
+        return False
+
+
 # ============================================
 # Customer Link Operations (for ref-based auth)
 # ============================================
