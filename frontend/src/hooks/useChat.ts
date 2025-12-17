@@ -102,6 +102,9 @@ export function useChat(options: UseChatOptions = {}) {
     return null;
   }, []);
 
+  // Track if auto-greeting has been sent for this session
+  const autoGreetSentRef = useRef(false);
+
   // Load session messages when sessionData changes (only if we have messages and current is empty)
   useEffect(() => {
     if (sessionData?.messages && sessionData.messages.length > 0 && messages.length === 0) {
@@ -426,6 +429,38 @@ export function useChat(options: UseChatOptions = {}) {
       disconnect();
     };
   }, [currentSessionId]); // Only depend on sessionId, not on connect/disconnect
+
+  // Auto-greet user when they land from email link (has customer data)
+  useEffect(() => {
+    // Only send greeting once per session, when no existing messages, and has customer data
+    const customer = getCustomerInfo();
+    if (
+      customer?.customer_id &&
+      !autoGreetSentRef.current &&
+      messages.length === 0 &&
+      isConnected &&
+      !isLoading
+    ) {
+      autoGreetSentRef.current = true;
+      // Small delay to ensure connection is ready
+      const greetTimeout = setTimeout(() => {
+        // Inject a proper AI greeting message directly
+        const greetingMessage: Message = {
+          id: `msg_greeting_${Date.now()}`,
+          role: 'assistant',
+          content: `Hello ${customer.name || 'there'}! 👋\n\nWelcome to NBFC Personal Loans. I'm your digital loan assistant.\n\nGreat news — you've been **pre-approved** for a personal loan! I'm here to help you:\n\n• Calculate your EMI for any amount\n• Complete quick KYC verification\n• Get your loan sanctioned in minutes\n\nHow much loan amount are you looking for, and over what tenure?`,
+          timestamp: new Date(),
+          isStreaming: false,
+          toolCalls: [],
+        };
+        setMessages([greetingMessage]);
+
+        // Save the greeting message to database
+        saveMessage('assistant', greetingMessage.content);
+      }, 300);
+      return () => clearTimeout(greetTimeout);
+    }
+  }, [isConnected, messages.length, isLoading, getCustomerInfo, saveMessage]);
 
   return {
     messages,
