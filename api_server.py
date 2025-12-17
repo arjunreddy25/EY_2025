@@ -29,7 +29,8 @@ from db_neon import (
     get_all_customers,
     create_customer_link,
     get_all_links,
-    verify_customer_link
+    verify_customer_link,
+    delete_customer
 )
 
 load_dotenv()
@@ -41,10 +42,6 @@ SMTP_EMAIL = os.getenv("SMTP_EMAIL")
 APP_PASSWORD = os.getenv("APP_PASSWORD")
 FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:5173")
 
-print("--- CONFIGURATION CHECK ---")
-print(f"SMTP_EMAIL present: {bool(SMTP_EMAIL)}")
-print(f"APP_PASSWORD present: {bool(APP_PASSWORD)}")
-print("---------------------------")
 
 
 
@@ -82,6 +79,10 @@ class LinkResponse(BaseModel):
 class SendEmailRequest(BaseModel):
     customer_ids: Optional[List[str]] = None
     subject: Optional[str] = "Your Pre-Approved Loan Offer is Ready! 🎉"
+
+
+class DeleteCustomersRequest(BaseModel):
+    customer_ids: List[str]
 
 
 class EmailResult(BaseModel):
@@ -303,6 +304,36 @@ async def send_customer_email(customer_id: str, subject: str = "Your Pre-Approve
         "link": link,
         "ref_id": ref_id,
         **result
+    }
+
+
+@app.post("/crm/delete-customers")
+async def delete_customers_endpoint(request: DeleteCustomersRequest):
+    """Delete multiple customers and their related data."""
+    if not request.customer_ids:
+        return {"deleted": 0, "failed": 0, "details": []}
+    
+    deleted_count = 0
+    failed_count = 0
+    details = []
+    
+    for customer_id in request.customer_ids:
+        try:
+            success = delete_customer(customer_id)
+            if success:
+                deleted_count += 1
+                details.append({"customer_id": customer_id, "status": "deleted"})
+            else:
+                failed_count += 1
+                details.append({"customer_id": customer_id, "status": "failed", "error": "Database error"})
+        except Exception as e:
+            failed_count += 1
+            details.append({"customer_id": customer_id, "status": "failed", "error": str(e)})
+            
+    return {
+        "deleted": deleted_count,
+        "failed": failed_count,
+        "details": details
     }
 
 

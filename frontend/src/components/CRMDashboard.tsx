@@ -3,7 +3,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import {
     Users, Link2, ExternalLink, Copy, Check,
-    RefreshCw, ArrowLeft, Send, Search, Filter, Mail
+    RefreshCw, ArrowLeft, Send, Search, Filter, Mail, Trash2
 } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 
@@ -17,13 +17,7 @@ interface Customer {
     pre_approved_limit: number;
 }
 
-interface GeneratedLink {
-    ref_id: string;
-    link: string;
-    customer_id: string;
-    customer_name: string;
-    expires_at: string;
-}
+
 
 interface LinkRecord {
     ref_id: string;
@@ -48,8 +42,9 @@ export function CRMDashboard() {
     const [activeTab, setActiveTab] = useState<'customers' | 'links'>('customers');
     const [copiedId, setCopiedId] = useState<string | null>(null);
     const [sendingEmail, setSendingEmail] = useState<string | null>(null);
-    const [generatingLink, setGeneratingLink] = useState<string | null>(null);
+
     const [sendingBatch, setSendingBatch] = useState(false);
+    const [deletingCustomers, setDeletingCustomers] = useState(false);
     const [selectedCustomers, setSelectedCustomers] = useState<Set<string>>(new Set());
     const [notification, setNotification] = useState<{ type: 'success' | 'error', message: string } | null>(null);
 
@@ -94,25 +89,7 @@ export function CRMDashboard() {
         setLoading(false);
     };
 
-    const generateLink = async (customerId: string) => {
-        setGeneratingLink(customerId);
-        try {
-            const response = await fetch(`${API_URL}/crm/generate-link/${customerId}`, {
-                method: 'POST',
-            });
-            const data: GeneratedLink = await response.json();
 
-            await navigator.clipboard.writeText(data.link);
-            setCopiedId(customerId);
-            setTimeout(() => setCopiedId(null), 2000);
-            await fetchLinks();
-        } catch (error) {
-            console.error('Failed to generate link:', error);
-            showNotification('error', 'Failed to generate link');
-        } finally {
-            setGeneratingLink(null);
-        }
-    };
 
     const sendEmail = async (customerId: string) => {
         setSendingEmail(customerId);
@@ -134,6 +111,41 @@ export function CRMDashboard() {
             showNotification('error', 'Failed to send email');
         } finally {
             setSendingEmail(null);
+        }
+    };
+
+    const deleteSelectedCustomers = async () => {
+        if (selectedCustomers.size === 0) {
+            showNotification('error', 'No customers selected for deletion');
+            return;
+        }
+
+        const confirmed = window.confirm(
+            `Are you sure you want to DELETE ${selectedCustomers.size} customer(s)? This cannot be undone.`
+        );
+        if (!confirmed) return;
+
+        setDeletingCustomers(true);
+        try {
+            const response = await fetch(`${API_URL}/crm/delete-customers`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ customer_ids: Array.from(selectedCustomers) }),
+            });
+            const data = await response.json();
+
+            showNotification(
+                data.deleted > 0 ? 'success' : 'error',
+                `Deleted: ${data.deleted}, Failed: ${data.failed}`
+            );
+
+            setSelectedCustomers(new Set());
+            await Promise.all([fetchCustomers(), fetchLinks()]);
+        } catch (error) {
+            console.error('Failed to delete customers:', error);
+            showNotification('error', 'Failed to delete customers');
+        } finally {
+            setDeletingCustomers(false);
         }
     };
 
@@ -260,6 +272,23 @@ export function CRMDashboard() {
                         </div>
 
                         <div className="flex items-center gap-2">
+                            {/* Bulk Actions */}
+                            {selectedCustomers.size > 0 && (
+                                <Button
+                                    variant="destructive"
+                                    size="sm"
+                                    onClick={deleteSelectedCustomers}
+                                    disabled={deletingCustomers || loading}
+                                >
+                                    {deletingCustomers ? (
+                                        <RefreshCw className="size-4 mr-2 animate-spin" />
+                                    ) : (
+                                        <Trash2 className="size-4 mr-2" />
+                                    )}
+                                    Delete ({selectedCustomers.size})
+                                </Button>
+                            )}
+
                             <Button
                                 variant="default"
                                 size="sm"
@@ -273,7 +302,7 @@ export function CRMDashboard() {
                                 )}
                                 {selectedCustomers.size > 0
                                     ? `Email Selected (${selectedCustomers.size})`
-                                    : 'Email All'}
+                                    : 'Email All Customers'}
                             </Button>
                             <Button
                                 variant="outline"
@@ -331,6 +360,15 @@ export function CRMDashboard() {
                         />
                     </div>
                     <div className="flex gap-2">
+                        {activeTab === 'customers' && (
+                            <Button
+                                variant="outline"
+                                onClick={selectAllCustomers}
+                            >
+                                <Check className={`size-4 mr-2 ${selectedCustomers.size === filteredCustomers.length && filteredCustomers.length > 0 ? 'opacity-100' : 'opacity-40'}`} />
+                                {selectedCustomers.size === filteredCustomers.length && filteredCustomers.length > 0 ? 'Deselect All' : 'Select All'}
+                            </Button>
+                        )}
                         <Button
                             variant={activeTab === 'customers' ? 'default' : 'outline'}
                             onClick={() => setActiveTab('customers')}
@@ -366,7 +404,17 @@ export function CRMDashboard() {
                             filteredCustomers.map((customer) => (
                                 <Card key={customer.customer_id} className="hover:shadow-md transition-shadow">
                                     <CardContent className="p-4">
-                                        <div className="flex flex-col lg:flex-row lg:items-center gap-4">
+                                        <div className="flex flex-row items-center gap-4">
+                                            {/* Checkbox */}
+                                            <div className="flex items-center justify-center">
+                                                <input
+                                                    type="checkbox"
+                                                    className="w-5 h-5 accent-primary cursor-pointer"
+                                                    checked={selectedCustomers.has(customer.customer_id)}
+                                                    onChange={() => toggleSelectCustomer(customer.customer_id)}
+                                                />
+                                            </div>
+
                                             {/* Customer Info */}
                                             <div className="flex-1 grid grid-cols-2 md:grid-cols-4 gap-4">
                                                 <div>
@@ -393,28 +441,12 @@ export function CRMDashboard() {
                                             </div>
 
                                             {/* Actions */}
-                                            <div className="flex gap-2 lg:flex-col">
-                                                <Button
-                                                    size="sm"
-                                                    variant="outline"
-                                                    onClick={() => generateLink(customer.customer_id)}
-                                                    disabled={generatingLink === customer.customer_id}
-                                                    className="flex-1"
-                                                >
-                                                    {generatingLink === customer.customer_id ? (
-                                                        <RefreshCw className="size-4 mr-2 animate-spin" />
-                                                    ) : copiedId === customer.customer_id ? (
-                                                        <Check className="size-4 mr-2 text-green-500" />
-                                                    ) : (
-                                                        <Link2 className="size-4 mr-2" />
-                                                    )}
-                                                    {copiedId === customer.customer_id ? 'Copied!' : 'Generate Link'}
-                                                </Button>
+                                            <div className="flex gap-2">
                                                 <Button
                                                     size="sm"
                                                     onClick={() => sendEmail(customer.customer_id)}
                                                     disabled={sendingEmail === customer.customer_id}
-                                                    className="flex-1"
+                                                    className="w-32"
                                                 >
                                                     {sendingEmail === customer.customer_id ? (
                                                         <RefreshCw className="size-4 mr-2 animate-spin" />

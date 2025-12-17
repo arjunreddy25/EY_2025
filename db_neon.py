@@ -147,6 +147,30 @@ def get_customer_by_email(email: str) -> Optional[Dict[str, Any]]:
             return customer
 
 
+def delete_customer(customer_id: str) -> bool:
+    """
+    Delete a customer and all related data (loans, links).
+    Returns True if deletion was successful.
+    """
+    try:
+        with get_db() as conn:
+            with conn.cursor() as cur:
+                # 1. Delete related links
+                cur.execute("DELETE FROM customer_links WHERE customer_id = %s", (customer_id,))
+                
+                # 2. Delete related loans
+                cur.execute("DELETE FROM existing_loans WHERE customer_id = %s", (customer_id,))
+                
+                # 3. Delete customer record
+                cur.execute("DELETE FROM customers WHERE customer_id = %s", (customer_id,))
+                
+                return True
+    except Exception as e:
+        print(f"❌ Error deleting customer {customer_id}: {e}")
+        return False
+
+
+
 def get_existing_loans(customer_id: str) -> list:
     """Fetch existing loans for a customer."""
     with get_db() as conn:
