@@ -7,6 +7,7 @@ Includes CRM functionality and SMTP email sending.
 import asyncio
 import json
 import os
+import re
 import smtplib
 import traceback
 # Ensure uploads directory exists
@@ -60,6 +61,24 @@ FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:5173")
 UPLOADS_DIR = pathlib.Path(__file__).parent.resolve() / "uploads"
 UPLOADS_DIR.mkdir(exist_ok=True)
 
+
+
+# Agent Decision Parser
+def parse_agent_decision(content: str) -> dict | None:
+    """
+    Parse [DECISION: Agent | TYPE | Details | Summary] patterns from agent output.
+    Returns dict with agent, decision_type, details, summary or None if not found.
+    """
+    pattern = r'\[DECISION:\s*([^|]+)\|([^|]+)\|([^|]+)\|([^\]]+)\]'
+    match = re.search(pattern, content)
+    if match:
+        return {
+            "agent": match.group(1).strip(),
+            "decision_type": match.group(2).strip(),
+            "details": match.group(3).strip(),
+            "summary": match.group(4).strip()
+        }
+    return None
 
 
 
@@ -866,6 +885,7 @@ async def websocket_chat(websocket: WebSocket, session_id: str = "default_sessio
                                 "type": "content",
                                 "data": run_output_event.content
                             })
+
                     
                     # Stream team-level tool events
                     elif run_output_event.event == TeamRunEvent.tool_call_started:
@@ -905,19 +925,88 @@ async def websocket_chat(websocket: WebSocket, session_id: str = "default_sessio
                             "tool": tool_name
                         })
                         
-                        # Emit sanction letter event when PDF is generated
-                        if tool_name == 'generate_sanction_letter' and result_str:
+                        # Parse tool results and emit agent_decision events
+                        if result_str:
                             try:
                                 result_data = json.loads(result_str)
-                                if result_data.get("status") == "generated":
+                                
+                                # EMI Calculation completed (Sales Agent)
+                                if tool_name == 'calculate_emi':
                                     await websocket.send_json({
-                                        "type": "sanction_letter",
-                                        "letter_id": result_data.get("letter_id"),
-                                        "pdf_url": f"http://localhost:8000{result_data.get('pdf_url')}",
-                                        "customer_name": result_data.get("customer_name"),
-                                        "sanctioned_amount": result_data.get("sanctioned_amount")
+                                        "type": "agent_decision",
+                                        "agent": "Sales Agent",
+                                        "decision_type": "EMI_CALCULATED",
+                                        "details": f"Amount: ₹{result_data.get('loan_amount'):,.0f}, Tenure: {result_data.get('tenure_months')} months, EMI: ₹{result_data.get('monthly_emi'):,.0f}",
+                                        "summary": "EMI calculation complete"
                                     })
-                            except json.JSONDecodeError:
+                                
+                                # KYC Verification completed
+                                elif tool_name == 'fetch_kyc_from_crm':
+                                    status = result_data.get('status', 'error')
+                                    if status == 'success' and result_data.get('kyc_verified'):
+                                        await websocket.send_json({
+                                            "type": "agent_decision",
+                                            "agent": "Verification Agent",
+                                            "decision_type": "KYC_VERIFIED",
+                                            "details": f"Customer: {result_data.get('name', 'Unknown')}, Phone & Address verified",
+                                            "summary": "Identity verification passed"
+                                        })
+                                    elif status == 'success' and not result_data.get('kyc_verified'):
+                                        await websocket.send_json({
+                                            "type": "agent_decision",
+                                            "agent": "Verification Agent",
+                                            "decision_type": "KYC_FAILED",
+                                            "details": "KYC documents not verified",
+                                            "summary": "Identity verification failed"
+                                        })
+                                
+                                # Loan Eligibility validated
+                                elif tool_name == 'validate_loan_eligibility':
+                                    status = result_data.get('status', '')
+                                    if status == 'approved':
+                                        await websocket.send_json({
+                                            "type": "agent_decision",
+                                            "agent": "Underwriting Agent",
+                                            "decision_type": "APPROVED",
+                                            "details": f"Amount: ₹{result_data.get('approved_amount'):,.0f} at {result_data.get('interest_rate')}% interest",
+                                            "summary": "Loan approved - proceed to sanction"
+                                        })
+                                    elif status == 'conditional_approval':
+                                        await websocket.send_json({
+                                            "type": "agent_decision",
+                                            "agent": "Underwriting Agent",
+                                            "decision_type": "CONDITIONAL",
+                                            "details": f"Requires: {result_data.get('requires', 'salary_slip_upload')}",
+                                            "summary": "Conditional approval - salary slip required"
+                                        })
+                                    elif status == 'rejected':
+                                        await websocket.send_json({
+                                            "type": "agent_decision",
+                                            "agent": "Underwriting Agent",
+                                            "decision_type": "REJECTED",
+                                            "details": f"Reason: {result_data.get('reason', 'Unknown')}",
+                                            "summary": "Loan application rejected"
+                                        })
+                                
+                                # Sanction letter generated
+                                elif tool_name == 'generate_sanction_letter':
+                                    if result_data.get("status") == "generated":
+                                        await websocket.send_json({
+                                            "type": "agent_decision",
+                                            "agent": "Sanction Agent",
+                                            "decision_type": "SANCTION_GENERATED",
+                                            "details": f"Letter ID: {result_data.get('letter_id')}, Amount: ₹{result_data.get('sanctioned_amount'):,.0f}",
+                                            "summary": "Sanction letter PDF created"
+                                        })
+                                        await websocket.send_json({
+                                            "type": "sanction_letter",
+                                            "letter_id": result_data.get("letter_id"),
+                                            "pdf_url": f"http://localhost:8000{result_data.get('pdf_url')}",
+                                            "customer_name": result_data.get("customer_name"),
+                                            "sanctioned_amount": result_data.get("sanctioned_amount")
+                                        })
+                            except (json.JSONDecodeError, TypeError, KeyError) as e:
+                                print(f"⚠️ Error parsing tool result: {e}")
                                 pass
                 
                 # Send completion signal

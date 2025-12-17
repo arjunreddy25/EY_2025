@@ -108,14 +108,14 @@ export function ChatInput({ onSend, isLoading = false, disabled = false }: ChatI
                   </Button>
                 </TooltipTrigger>
                 <TooltipContent side="top">
-                  Attach salary slip (PDF/Image)
+                  Attach salary slip (Image only)
                 </TooltipContent>
               </Tooltip>
 
               <input
                 ref={fileInputRef}
                 type="file"
-                accept=".pdf,.png,.jpg,.jpeg"
+                accept=".png,.jpg,.jpeg,.webp"
                 onChange={handleFileSelect}
                 className="hidden"
               />

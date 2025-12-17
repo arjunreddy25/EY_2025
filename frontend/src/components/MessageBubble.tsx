@@ -32,7 +32,6 @@ function ToolCallBadge({ toolCall }: { toolCall: ToolCall }) {
 }
 
 
-
 export function MessageBubble({ message }: MessageBubbleProps) {
   const [copied, setCopied] = useState(false);
   const isUser = message.role === 'user';
@@ -100,7 +99,6 @@ export function MessageBubble({ message }: MessageBubbleProps) {
             </div>
           )}
         </div>
-
         {/* Action buttons for assistant messages */}
         {!isUser && message.content && !message.isStreaming && (
           <div className="mt-2 flex items-center gap-2">
