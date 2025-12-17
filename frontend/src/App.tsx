@@ -31,6 +31,8 @@ function RefVerifier() {
               name: data.name,
               customer_id: data.customer_id
             }));
+            // Mark as fresh arrival from email - will be cleared after greeting
+            localStorage.setItem('fromEmailRedirect', 'true');
 
             // Link any anonymous sessions to this customer
             const storedIds = JSON.parse(localStorage.getItem('chat_session_ids') || '[]');

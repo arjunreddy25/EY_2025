@@ -431,23 +431,24 @@ export function useChat(options: UseChatOptions = {}) {
     };
   }, [currentSessionId]); // Only depend on sessionId, not on connect/disconnect
 
-  // Auto-greet user when they land from email link (has customer data)
-  // ONLY for NEW sessions - not when loading existing sessions from chat list
+  // Auto-greet user ONLY when they land from email link
+  // Checks for 'fromEmailRedirect' flag set in App.tsx RefVerifier
   useEffect(() => {
     const customer = getCustomerInfo();
-    // Check if this session already exists in database (user clicked from chat list)
-    const sessionExistsInDB = sessions.some((s) => s.id === currentSessionId);
+    const isFromEmail = localStorage.getItem('fromEmailRedirect') === 'true';
 
-    // Only send greeting for NEW sessions with customer data
+    // Only send greeting for FRESH email redirects
     if (
       customer?.customer_id &&
+      isFromEmail &&  // KEY: Only when just arrived from email
       !autoGreetSentRef.current &&
-      !sessionExistsInDB &&  // KEY: Only for new sessions, not existing ones
       messages.length === 0 &&
       isConnected &&
       !isLoading
     ) {
       autoGreetSentRef.current = true;
+      // Clear the flag immediately so it doesn't fire again
+      localStorage.removeItem('fromEmailRedirect');
       // Small delay to ensure connection is ready
       const greetTimeout = setTimeout(async () => {
         // Create session in database for email redirect users
@@ -477,7 +478,7 @@ export function useChat(options: UseChatOptions = {}) {
       }, 300);
       return () => clearTimeout(greetTimeout);
     }
-  }, [isConnected, messages.length, isLoading, getCustomerInfo, saveMessage, sessions, currentSessionId, createSessionMutation, onNavigate]);
+  }, [isConnected, messages.length, isLoading, getCustomerInfo, saveMessage, currentSessionId, createSessionMutation, onNavigate]);
 
   return {
     messages,
