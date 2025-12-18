@@ -177,3 +177,69 @@ export async function generateTitle(sessionId: string, message: string): Promise
   if (!res.ok) throw new Error('Failed to generate title');
   return res.json();
 }
+
+// ============================================
+// Customer Loans & Documents API
+// ============================================
+
+export interface LoanApplication {
+  application_id: string;
+  customer_id: string;
+  amount: number;
+  tenure_months: number;
+  interest_rate: number;
+  monthly_emi: number;
+  status: string;
+  sanction_letter_url?: string;
+  created_at: string;
+}
+
+export interface CustomerDocuments {
+  salary_slip: {
+    verified: boolean;
+    url?: string;
+    verified_at?: string;
+  };
+  sanction_letters: Array<{
+    application_id: string;
+    sanction_letter_url: string;
+    amount: number;
+    status: string;
+    created_at: string;
+  }>;
+}
+
+/**
+ * Fetch all loan applications for a customer
+ */
+export async function fetchCustomerLoans(customerId: string): Promise<{
+  customer_id: string;
+  customer_name: string;
+  loans: LoanApplication[];
+  total_loans: number;
+}> {
+  const res = await fetch(`${API_BASE}/customer/${customerId}/loans`);
+  if (!res.ok) throw new Error('Failed to fetch customer loans');
+  return res.json();
+}
+
+/**
+ * Fetch all documents for a customer (salary slips, sanction letters)
+ */
+export async function fetchCustomerDocuments(customerId: string): Promise<{
+  customer_id: string;
+  customer_name: string;
+  documents: CustomerDocuments;
+}> {
+  const res = await fetch(`${API_BASE}/customer/${customerId}/documents`);
+  if (!res.ok) throw new Error('Failed to fetch customer documents');
+  return res.json();
+}
+
+/**
+ * Get the current customer ID from localStorage
+ */
+export function getCurrentCustomerId(): string | null {
+  const customer = getCustomerInfo();
+  return customer?.customer_id || null;
+}

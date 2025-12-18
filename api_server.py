@@ -47,7 +47,12 @@ from db_neon import (
     save_chat_message,
     update_session_title,
     delete_chat_session,
-    link_sessions_to_customer
+    link_sessions_to_customer,
+    # Loan tracking operations
+    get_loan_applications,
+    get_latest_loan_status,
+    update_customer_salary_verification,
+    get_customer_documents
 )
 
 load_dotenv()
@@ -231,7 +236,7 @@ def build_session_state(customer_id: Optional[str]) -> dict:
     if customer_id:
         customer = get_customer(customer_id)
         if customer:
-            # Include only essential fields to keep context short
+            # Include essential fields plus verification/loan status
             session_state["customer"] = {
                 "customer_id": customer.get("customer_id"),
                 "name": customer.get("name"),
@@ -243,7 +248,21 @@ def build_session_state(customer_id: Optional[str]) -> dict:
                 "pre_approved_limit": customer.get("pre_approved_limit"),
                 "total_existing_emi": customer.get("total_existing_emi"),
                 "kyc_verified": customer.get("kyc_verified"),
+                # New: Salary slip verification status
+                "salary_slip_verified": customer.get("salary_slip_verified", False),
+                "salary_slip_url": customer.get("salary_slip_url"),
             }
+            
+            # Get latest loan status to include in session state
+            latest_loan = get_latest_loan_status(customer_id)
+            if latest_loan:
+                session_state["customer"]["has_active_loan"] = True
+                session_state["customer"]["last_loan_status"] = latest_loan.get("status")
+                session_state["customer"]["last_sanction_letter_url"] = latest_loan.get("sanction_letter_url")
+            else:
+                session_state["customer"]["has_active_loan"] = False
+                session_state["customer"]["last_loan_status"] = None
+                session_state["customer"]["last_sanction_letter_url"] = None
     
     return session_state
 
@@ -306,13 +325,18 @@ async def health_check():
 # ============================================
 
 from tools import extract_salary_from_slip
+from s3_utils import upload_file_to_s3
 
 
 @app.post("/upload/salary-slip")
-async def upload_salary_slip(file: UploadFile = File(...)):
+async def upload_salary_slip(
+    file: UploadFile = File(...),
+    customer_id: Optional[str] = None
+):
     """
     Upload a salary slip (PDF or image) for verification.
     Immediately processes with VLM and returns extracted salary data.
+    Optionally persists verification status to customer record.
     """
     # Validate file type - Groq Vision only supports images, not PDFs
     allowed_types = {".png", ".jpg", ".jpeg", ".webp"}
@@ -325,7 +349,7 @@ async def upload_salary_slip(file: UploadFile = File(...)):
     
     # Generate unique filename
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    safe_filename = f"salary_slip_{timestamp}{suffix}"
+    safe_filename = f"salary_slip_{customer_id or 'anon'}_{timestamp}{suffix}"
     file_path = UPLOADS_DIR / safe_filename
     
     # Save file locally
@@ -344,10 +368,64 @@ async def upload_salary_slip(file: UploadFile = File(...)):
     
     print(f"🔍 VLM extraction result: {extracted_data}")
     
+    # Upload to S3 and get URL
+    s3_url = upload_file_to_s3(str(file_path), f"salary_slips/{safe_filename}")
+    final_url = s3_url if s3_url else f"/uploads/{safe_filename}"
+    
+    # If extraction successful and customer_id provided, update verification status in DB
+    is_verified = extracted_data.get("status") == "success" and extracted_data.get("net_salary")
+    if customer_id and is_verified:
+        update_customer_salary_verification(customer_id, True, final_url)
+        print(f"✅ Salary slip verified for customer {customer_id}")
+    
     return {
         "status": "processed",
         "filename": safe_filename,
+        "url": final_url,
+        "verified": is_verified,
         "extracted": extracted_data
+    }
+
+
+# ============================================
+# Customer Loans & Documents Endpoints
+# ============================================
+
+@app.get("/customer/{customer_id}/loans")
+async def get_customer_loans(customer_id: str):
+    """Get all loan applications/sanctions for a customer."""
+    customer = get_customer(customer_id)
+    if not customer:
+        raise HTTPException(status_code=404, detail="Customer not found")
+    
+    loans = get_loan_applications(customer_id)
+    
+    # Format dates for JSON
+    for loan in loans:
+        if loan.get("created_at"):
+            loan["created_at"] = loan["created_at"].isoformat()
+    
+    return {
+        "customer_id": customer_id,
+        "customer_name": customer.get("name"),
+        "loans": loans,
+        "total_loans": len(loans)
+    }
+
+
+@app.get("/customer/{customer_id}/documents")
+async def get_customer_docs(customer_id: str):
+    """Get all documents for a customer: salary slips and sanction letters."""
+    customer = get_customer(customer_id)
+    if not customer:
+        raise HTTPException(status_code=404, detail="Customer not found")
+    
+    documents = get_customer_documents(customer_id)
+    
+    return {
+        "customer_id": customer_id,
+        "customer_name": customer.get("name"),
+        "documents": documents
     }
 
 

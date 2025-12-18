@@ -3,6 +3,7 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { Separator } from '@/components/ui/separator';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { Skeleton } from '@/components/ui/skeleton';
+import { useState } from 'react';
 import { 
   Plus, 
   MessageSquare, 
@@ -13,11 +14,12 @@ import {
   Trash2,
   CreditCard,
   LogOut,
-  HelpCircle,
-  User
+  User,
+  Wallet
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { ChatSession } from '@/hooks/useChat';
+import { MyLoansDrawer } from './MyLoansDrawer';
 
 interface SidebarProps {
   isOpen: boolean;
@@ -48,8 +50,10 @@ export function Sidebar({
   user,
   onLogout,
 }: SidebarProps) {
+  const [isLoansDrawerOpen, setIsLoansDrawerOpen] = useState(false);
 
   return (
+    <>
     <TooltipProvider>
       <div
         className={cn(
@@ -209,6 +213,29 @@ export function Sidebar({
             )}
           </Tooltip> */}
 
+            {/* My Loans Button - Only show when user is logged in */}
+            {user && (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size={isOpen ? "default" : "icon"}
+                    onClick={() => setIsLoansDrawerOpen(true)}
+                    className={cn(
+                      "w-full gap-3 cursor-pointer",
+                      isOpen ? "justify-start px-3" : "justify-center"
+                    )}
+                  >
+                    <Wallet className="size-4" />
+                    {isOpen && <span>My Loans</span>}
+                  </Button>
+                </TooltipTrigger>
+                {!isOpen && (
+                  <TooltipContent side="right">My Loans</TooltipContent>
+                )}
+              </Tooltip>
+            )}
+
           {/* Theme Toggle */}
           <Tooltip>
             <TooltipTrigger asChild>
@@ -297,5 +324,12 @@ export function Sidebar({
         </div>
       </div>
     </TooltipProvider>
+
+      {/* My Loans Drawer */}
+      <MyLoansDrawer
+        isOpen={isLoansDrawerOpen}
+        onClose={() => setIsLoansDrawerOpen(false)}
+      />
+    </>
   );
 }

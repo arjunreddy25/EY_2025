@@ -244,6 +244,185 @@ def create_loan_application(
         return False
 
 
+def get_loan_applications(customer_id: str) -> list:
+    """Fetch all loan applications for a customer."""
+    try:
+        with get_db() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT application_id, customer_id, amount, tenure_months, 
+                           interest_rate, monthly_emi, status, sanction_letter_url, created_at
+                    FROM loan_applications 
+                    WHERE customer_id = %s
+                    ORDER BY created_at DESC
+                    """,
+                    (customer_id,)
+                )
+                loans = cur.fetchall()
+                result = []
+                for loan in loans:
+                    loan_dict = dict(loan)
+                    # Convert Decimal to float for JSON compatibility
+                    for key in ['amount', 'interest_rate', 'monthly_emi']:
+                        if loan_dict.get(key):
+                            loan_dict[key] = float(loan_dict[key])
+                    result.append(loan_dict)
+                return result
+    except Exception as e:
+        print(f"❌ Error fetching loan applications: {e}")
+        return []
+
+
+def get_latest_loan_status(customer_id: str) -> Optional[Dict[str, Any]]:
+    """Get the most recent loan application status for a customer."""
+    try:
+        with get_db() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT application_id, status, sanction_letter_url, amount, created_at
+                    FROM loan_applications 
+                    WHERE customer_id = %s
+                    ORDER BY created_at DESC
+                    LIMIT 1
+                    """,
+                    (customer_id,)
+                )
+                loan = cur.fetchone()
+                if loan:
+                    loan_dict = dict(loan)
+                    if loan_dict.get('amount'):
+                        loan_dict['amount'] = float(loan_dict['amount'])
+                    return loan_dict
+                return None
+    except Exception as e:
+        print(f"❌ Error fetching latest loan status: {e}")
+        return None
+
+
+# ============================================
+# Salary Slip Verification Operations
+# ============================================
+
+def add_salary_slip_columns_if_not_exist():
+    """Add salary slip tracking columns to customers table if they don't exist."""
+    try:
+        with get_db() as conn:
+            with conn.cursor() as cur:
+                # Check if columns exist and add them if not
+                cur.execute("""
+                    DO $$ 
+                    BEGIN
+                        IF NOT EXISTS (
+                            SELECT 1 FROM information_schema.columns 
+                            WHERE table_name = 'customers' AND column_name = 'salary_slip_verified'
+                        ) THEN
+                            ALTER TABLE customers ADD COLUMN salary_slip_verified BOOLEAN DEFAULT FALSE;
+                        END IF;
+                        
+                        IF NOT EXISTS (
+                            SELECT 1 FROM information_schema.columns 
+                            WHERE table_name = 'customers' AND column_name = 'salary_slip_url'
+                        ) THEN
+                            ALTER TABLE customers ADD COLUMN salary_slip_url TEXT;
+                        END IF;
+                        
+                        IF NOT EXISTS (
+                            SELECT 1 FROM information_schema.columns 
+                            WHERE table_name = 'customers' AND column_name = 'salary_slip_verified_at'
+                        ) THEN
+                            ALTER TABLE customers ADD COLUMN salary_slip_verified_at TIMESTAMP;
+                        END IF;
+                    END $$;
+                """)
+        print("✅ Salary slip columns verified/added to customers table")
+    except Exception as e:
+        print(f"⚠️ Warning: Could not add salary slip columns: {e}")
+
+# Run migration on module load
+try:
+    add_salary_slip_columns_if_not_exist()
+except Exception as e:
+    print(f"⚠️ Warning: Could not run salary slip migration: {e}")
+
+
+def update_customer_salary_verification(
+    customer_id: str, 
+    verified: bool, 
+    salary_slip_url: Optional[str] = None
+) -> bool:
+    """Update customer's salary slip verification status."""
+    try:
+        with get_db() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    UPDATE customers 
+                    SET salary_slip_verified = %s, 
+                        salary_slip_url = %s,
+                        salary_slip_verified_at = CASE WHEN %s THEN NOW() ELSE salary_slip_verified_at END
+                    WHERE customer_id = %s
+                    """,
+                    (verified, salary_slip_url, verified, customer_id)
+                )
+                return cur.rowcount > 0
+    except Exception as e:
+        print(f"❌ Error updating salary verification: {e}")
+        return False
+
+
+def get_customer_documents(customer_id: str) -> Dict[str, Any]:
+    """Get all documents for a customer: salary slips and sanction letters."""
+    try:
+        with get_db() as conn:
+            with conn.cursor() as cur:
+                # Get salary slip info
+                cur.execute(
+                    """
+                    SELECT salary_slip_verified, salary_slip_url, salary_slip_verified_at
+                    FROM customers 
+                    WHERE customer_id = %s
+                    """,
+                    (customer_id,)
+                )
+                customer_docs = cur.fetchone()
+                
+                # Get all sanction letters
+                cur.execute(
+                    """
+                    SELECT application_id, sanction_letter_url, amount, status, created_at
+                    FROM loan_applications 
+                    WHERE customer_id = %s AND sanction_letter_url IS NOT NULL
+                    ORDER BY created_at DESC
+                    """,
+                    (customer_id,)
+                )
+                sanction_letters = cur.fetchall()
+                
+                result = {
+                    "salary_slip": {
+                        "verified": customer_docs['salary_slip_verified'] if customer_docs else False,
+                        "url": customer_docs['salary_slip_url'] if customer_docs else None,
+                        "verified_at": customer_docs['salary_slip_verified_at'].isoformat() if customer_docs and customer_docs['salary_slip_verified_at'] else None
+                    } if customer_docs else {"verified": False, "url": None, "verified_at": None},
+                    "sanction_letters": []
+                }
+                
+                for letter in sanction_letters:
+                    letter_dict = dict(letter)
+                    if letter_dict.get('amount'):
+                        letter_dict['amount'] = float(letter_dict['amount'])
+                    if letter_dict.get('created_at'):
+                        letter_dict['created_at'] = letter_dict['created_at'].isoformat()
+                    result["sanction_letters"].append(letter_dict)
+                
+                return result
+    except Exception as e:
+        print(f"❌ Error fetching customer documents: {e}")
+        return {"salary_slip": {"verified": False, "url": None, "verified_at": None}, "sanction_letters": []}
+
+
 # ============================================
 # Customer Link Operations (for ref-based auth)
 # ============================================
