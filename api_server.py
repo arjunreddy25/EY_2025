@@ -164,7 +164,10 @@ class ChatSessionResponse(BaseModel):
 
 def send_smtp_email(to_email: str, customer_name: str, ref_link: str, pre_approved_limit: float, subject: str) -> dict:
     """Send email via SMTP with Gmail App Password."""
+    print(f"📧 Attempting to send email to: {to_email}")
+    
     if not SMTP_EMAIL or not APP_PASSWORD:
+        print(f"❌ Email config missing - SMTP_EMAIL: {bool(SMTP_EMAIL)}, APP_PASSWORD: {bool(APP_PASSWORD)}")
         return {"status": "error", "message": "SMTP_EMAIL or APP_PASSWORD not configured"}
     
     html_content = f"""
@@ -208,13 +211,18 @@ def send_smtp_email(to_email: str, customer_name: str, ref_link: str, pre_approv
         
         msg.attach(MIMEText(html_content, "html"))
         
+        print(f"📤 Connecting to SMTP server {SMTP_HOST}:{SMTP_PORT}...")
         with smtplib.SMTP(SMTP_HOST, SMTP_PORT) as server:
             server.starttls()
+            print(f"🔐 Logging in as {SMTP_EMAIL}...")
             server.login(SMTP_EMAIL, APP_PASSWORD)
             server.sendmail(SMTP_EMAIL, to_email, msg.as_string())
         
+        print(f"✅ Email sent successfully to {to_email}")
         return {"status": "sent", "message": "Email sent successfully"}
     except Exception as e:
+        print(f"❌ Email failed to {to_email}: {e}")
+        traceback.print_exc()
         return {"status": "error", "message": str(e)}
 
 
