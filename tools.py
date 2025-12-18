@@ -353,6 +353,10 @@ def validate_loan_eligibility(
     credit_score = customer["credit_score"]
     salary = customer.get("monthly_salary", customer.get("salary", 0))  # Support both field names
     pre_limit = customer["pre_approved_limit"]
+    
+    # Get existing loan EMIs for FOIR calculation
+    existing_loans = customer.get("existing_loans", [])
+    total_existing_emi = sum(loan.get("emi", 0) for loan in existing_loans)
 
     # Rule 1: Credit score check
     if credit_score < 700:
@@ -361,7 +365,7 @@ def validate_loan_eligibility(
             "reason": "Credit score below 700"
         })
 
-    # Rule 2: Instant approval
+    # Rule 2: Instant approval (for amounts within pre-approved limit)
     if loan_amount <= pre_limit:
         # Calculate interest rate based on credit score
         interest_rate = calculate_interest_rate(credit_score)
@@ -377,21 +381,34 @@ def validate_loan_eligibility(
                 * (1 + monthly_rate) ** tenure_months
             ) / ((1 + monthly_rate) ** tenure_months - 1)
         
+        # FOIR Check: Total obligations (existing + new) should not exceed 50% of salary
+        total_obligations = total_existing_emi + emi
+        foir_ratio = (total_obligations / salary) * 100 if salary > 0 else 100
+        
+        if foir_ratio > 50:
+            return json.dumps({
+                "status": "rejected",
+                "reason": "High debt-to-income ratio (FOIR violation)",
+                "details": f"Total EMIs (existing + new) of Rs. {total_obligations:,.0f} exceeds 50% of monthly salary Rs. {salary:,.0f}",
+                "foir_ratio": round(foir_ratio, 1),
+                "existing_emi": round(total_existing_emi, 2),
+                "new_emi": round(emi, 2)
+            })
+        
         return json.dumps({
             "status": "approved",
             "approval_type": "instant",
             "approved_amount": loan_amount,
             "interest_rate": interest_rate,
-            "emi": round(emi, 2)
+            "emi": round(emi, 2),
+            "foir_ratio": round(foir_ratio, 1),
+            "existing_emi": round(total_existing_emi, 2)
         })
 
-    # Rule 3: Conditional approval
+    # Rule 3: Conditional approval (for amounts up to 2x pre-approved limit)
     if loan_amount <= 2 * pre_limit:
         # Calculate EMI using proper reducing balance formula with interest rate
-        # Get interest rate based on credit score
         interest_rate = calculate_interest_rate(credit_score)
-        
-        # Calculate EMI using reducing balance formula
         monthly_rate = interest_rate / (12 * 100)
         
         if monthly_rate == 0:
@@ -403,18 +420,28 @@ def validate_loan_eligibility(
                 * (1 + monthly_rate) ** tenure_months
             ) / ((1 + monthly_rate) ** tenure_months - 1)
 
-        if emi <= 0.5 * salary:
+        # FOIR Check: Total obligations (existing + new) should not exceed 50% of salary
+        total_obligations = total_existing_emi + emi
+        foir_ratio = (total_obligations / salary) * 100 if salary > 0 else 100
+        
+        if foir_ratio > 50:
             return json.dumps({
-                "status": "conditional_approval",
-                "requires": "salary_slip_upload",
-                "approved_amount": loan_amount,
-                "emi": round(emi, 2),
-                "interest_rate": interest_rate
+                "status": "rejected",
+                "reason": "High debt-to-income ratio (FOIR violation)",
+                "details": f"Total EMIs (existing + new) of Rs. {total_obligations:,.0f} exceeds 50% of monthly salary Rs. {salary:,.0f}",
+                "foir_ratio": round(foir_ratio, 1),
+                "existing_emi": round(total_existing_emi, 2),
+                "new_emi": round(emi, 2)
             })
-
+        
         return json.dumps({
-            "status": "rejected",
-            "reason": "EMI exceeds 50% of salary"
+            "status": "conditional_approval",
+            "requires": "salary_slip_upload",
+            "approved_amount": loan_amount,
+            "emi": round(emi, 2),
+            "interest_rate": interest_rate,
+            "foir_ratio": round(foir_ratio, 1),
+            "existing_emi": round(total_existing_emi, 2)
         })
 
     # Rule 4: Hard rejection
