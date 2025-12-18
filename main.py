@@ -89,9 +89,21 @@ sanction_agent = Agent(
 )
 
 # Default session state template (will be populated with customer data at runtime)
+# NOTE: This defines the SCHEMA for what agents can update via enable_agentic_state
+# All top-level keys that agents might need to update must be defined here
 DEFAULT_SESSION_STATE = {
     "customer": None,  # Populated from DB when customer_id is provided
     "step": "sales",   # Current step: sales | verification | underwriting | sanction
+    # Fields agents may update during workflow
+    "monthly_salary": None,
+    "employer": None,
+    "salary_slip_verified": False,
+    "kyc_verified": False,
+    "loan_approved": False,
+    "loan_amount": None,
+    "interest_rate": None,
+    "tenure_months": None,
+    "emi": None,
 }
 
 loan_sales_team = Team(

@@ -351,7 +351,7 @@ def validate_loan_eligibility(
         })
 
     credit_score = customer["credit_score"]
-    salary = customer["salary"]
+    salary = customer.get("monthly_salary", customer.get("salary", 0))  # Support both field names
     pre_limit = customer["pre_approved_limit"]
 
     # Rule 1: Credit score check

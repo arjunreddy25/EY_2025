@@ -33,6 +33,15 @@ export interface ToolCall {
   result?: string;
 }
 
+export interface AgentDecision {
+  id: string;
+  agent: string;
+  decisionType: string;
+  details: string;
+  summary: string;
+  timestamp: Date;
+}
+
 export interface ChatSession {
   id: string;
   title: string;
@@ -64,6 +73,7 @@ export function useChat(options: UseChatOptions = {}) {
   const [currentSessionId, setCurrentSessionId] = useState(
     initialSessionId || `session_${Date.now()}`
   );
+  const [agentDecisions, setAgentDecisions] = useState<AgentDecision[]>([]);
 
   // Refs
   const wsRef = useRef<WebSocket | null>(null);
@@ -262,6 +272,21 @@ export function useChat(options: UseChatOptions = {}) {
             }
             return updated;
           });
+          break;
+
+        case 'agent_decision':
+          // Capture agent workflow decisions for the activity timeline
+          setAgentDecisions((prev) => [
+            ...prev,
+            {
+              id: `decision_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+              agent: data.agent,
+              decisionType: data.decision_type,
+              details: data.details,
+              summary: data.summary,
+              timestamp: new Date(),
+            },
+          ]);
           break;
       }
     };
@@ -549,6 +574,11 @@ export function useChat(options: UseChatOptions = {}) {
     }
   }, [isConnected, messages.length, isLoading, getCustomerInfo, saveMessage, currentSessionId, createSessionMutation, onNavigate]);
 
+  // Clear agent decisions (for new sessions)
+  const clearAgentDecisions = useCallback(() => {
+    setAgentDecisions([]);
+  }, []);
+
   return {
     messages,
     isConnected,
@@ -557,6 +587,7 @@ export function useChat(options: UseChatOptions = {}) {
     currentToolCall,
     sessions,
     currentSessionId,
+    agentDecisions,
     sendMessage,
     newSession,
     loadSession,
@@ -564,5 +595,6 @@ export function useChat(options: UseChatOptions = {}) {
     fetchSessions: refetchSessions,
     connect,
     disconnect,
+    clearAgentDecisions,
   };
 }
