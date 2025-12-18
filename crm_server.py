@@ -1,5 +1,6 @@
 from fastapi import FastAPI, HTTPException
 from db_neon import get_customer
+import uvicorn
 
 app = FastAPI(title="Dummy CRM KYC Server")
 
@@ -22,3 +23,8 @@ def get_kyc_details(customer_id: str):
         "address": customer["address"],
         "kyc_verified": True
     }
+
+
+if __name__ == "__main__":
+    print("🚀 Starting CRM Server on port 8001...")
+    uvicorn.run(app, host="0.0.0.0", port=8001)

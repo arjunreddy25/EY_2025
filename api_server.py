@@ -213,14 +213,39 @@ def send_smtp_email(to_email: str, customer_name: str, ref_link: str, pre_approv
         return {"status": "error", "message": str(e)}
 
 
-def build_context_message(message: str, customer_id: Optional[str], customer_name: Optional[str]) -> str:
-    """Inject customer context into the message for the agents."""
-    if customer_id and customer_name:
-        return f"[SYSTEM CONTEXT: Customer identified - ID: {customer_id}, Name: {customer_name}. Do NOT ask for customer ID - you already have it. Use this ID for all tool calls.]\n\nCustomer says: {message}"
-    elif customer_id:
-        return f"[SYSTEM CONTEXT: Customer identified - ID: {customer_id}. Do NOT ask for customer ID - you already have it. Use this ID for all tool calls.]\n\nCustomer says: {message}"
-    else:
-        return message
+def build_session_state(customer_id: Optional[str]) -> dict:
+    """
+    Build session state with customer profile from DB.
+    
+    NOTE: We only pass 'customer' data here, NOT 'step'.
+    Why? Agno MERGES by overwriting matching keys. If we pass step:"sales" every time,
+    it would overwrite agent-updated step values (e.g., "verification").
+    
+    The 'step' field is managed by agents via enable_agentic_state=True.
+    """
+    session_state = {
+        "customer": None,
+        # DO NOT include "step" here - agents manage it via agentic_state
+    }
+    
+    if customer_id:
+        customer = get_customer(customer_id)
+        if customer:
+            # Include only essential fields to keep context short
+            session_state["customer"] = {
+                "customer_id": customer.get("customer_id"),
+                "name": customer.get("name"),
+                "employer": customer.get("employer"),
+                "designation": customer.get("designation"),
+                "years_employed": customer.get("years_employed"),
+                "monthly_salary": customer.get("monthly_salary"),
+                "credit_score": customer.get("credit_score"),
+                "pre_approved_limit": customer.get("pre_approved_limit"),
+                "total_existing_emi": customer.get("total_existing_emi"),
+                "kyc_verified": customer.get("kyc_verified"),
+            }
+    
+    return session_state
 
 
 @asynccontextmanager
@@ -740,16 +765,15 @@ async def chat_endpoint(chat: ChatMessage):
     For streaming, use WebSocket endpoint /ws/chat or SSE endpoint /chat/stream.
     """
     try:
-        # Build message with customer context
-        contextualized_message = build_context_message(
-            chat.message, chat.customer_id, chat.customer_name
-        )
+        # Build session state with customer profile
+        session_state = build_session_state(chat.customer_id)
         
         # Use arun() directly for async execution
         response = await loan_sales_team.arun(
-            contextualized_message,
+            chat.message,  # Plain message, no context prepend
             stream=False,
-            session_id=chat.session_id
+            session_id=chat.session_id,
+            session_state=session_state  # Customer data injected here
         )
         return {
             "response": response.content if hasattr(response, 'content') else str(response),
@@ -771,20 +795,20 @@ async def chat_stream_endpoint(
     Usage: GET /chat/stream?message=hello&session_id=abc123&customer_id=CUST001&customer_name=John
     """
     
-    # Build contextualized message
-    contextualized_message = build_context_message(message, customer_id, customer_name)
+    # Build session state with customer profile
+    session_state = build_session_state(customer_id)
     
     async def event_generator():
         try:
             content_started = False
             
             # Use arun() directly - no threading needed! Members run concurrently
-            # arun() returns an async generator, so we iterate directly without await
             async for run_output_event in loan_sales_team.arun(
-                contextualized_message,
+                message,  # Plain message
                 stream=True,
                 stream_events=True,
-                session_id=session_id
+                session_id=session_id,
+                session_state=session_state  # Customer data injected here
             ):
                 # Stream content tokens
                 if run_output_event.event == TeamRunEvent.run_content:
@@ -855,8 +879,8 @@ async def websocket_chat(websocket: WebSocket, session_id: str = "default_sessio
                 })
                 continue
             
-            # Build contextualized message with customer info
-            contextualized_message = build_context_message(user_message, customer_id, customer_name)
+            # Build session state with customer profile
+            session_state = build_session_state(customer_id)
             
             # Send acknowledgment
             await websocket.send_json({
@@ -864,17 +888,20 @@ async def websocket_chat(websocket: WebSocket, session_id: str = "default_sessio
                 "message": "Processing..."
             })
             
+            print(f"📨 WebSocket received message: '{user_message[:50]}...' for session: {session_id}")
+            
             # Stream response using async generator
             content_started = False
             
             try:
+                print(f"🚀 Starting loan_sales_team.arun() for session: {session_id}")
                 # Use arun() directly - no threading needed! Members run concurrently
-                # arun() returns an async generator, so we iterate directly without await
                 async for run_output_event in loan_sales_team.arun(
-                    contextualized_message,
+                    user_message,  # Plain message
                     stream=True,
                     stream_events=True,
-                    session_id=session_id
+                    session_id=session_id,
+                    session_state=session_state  # Customer data injected here
                 ):
                     # Stream content tokens in real-time
                     if run_output_event.event == TeamRunEvent.run_content:
@@ -1015,19 +1042,25 @@ async def websocket_chat(websocket: WebSocket, session_id: str = "default_sessio
                                 pass
                 
                 # Send completion signal
+                print(f"✅ Response completed for session: {session_id}")
                 await websocket.send_json({
                     "type": "done"
                 })
             
             except Exception as e:
+                print(f"❌ Error in arun(): {e}")
+                import traceback
+                traceback.print_exc()
                 await websocket.send_json({
                     "type": "error",
                     "message": str(e)
                 })
     
     except WebSocketDisconnect:
+        print(f"🔌 WebSocket disconnected for session: {session_id}")
         manager.disconnect(session_id)
     except Exception as e:
+        print(f"💥 WebSocket exception: {e}")
         manager.disconnect(session_id)
         raise
 

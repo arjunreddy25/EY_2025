@@ -132,7 +132,15 @@ export function useChat(options: UseChatOptions = {}) {
 
   // Connect to WebSocket
   const connect = useCallback(() => {
+    // Don't create new connection if already connected or connecting
     if (wsRef.current?.readyState === WebSocket.OPEN) return;
+    if (wsRef.current?.readyState === WebSocket.CONNECTING) return;
+
+    // Close any existing connection that's in closing state
+    if (wsRef.current) {
+      wsRef.current.close();
+      wsRef.current = null;
+    }
 
     const ws = new WebSocket(`${wsUrl}?session_id=${currentSessionIdRef.current}`);
 
@@ -142,9 +150,11 @@ export function useChat(options: UseChatOptions = {}) {
 
     ws.onmessage = (event) => {
       const data = JSON.parse(event.data);
+      console.log('[WS] Received message:', data.type, data);
 
       switch (data.type) {
         case 'ack':
+          console.log('[WS] Got acknowledgment');
           break;
 
         case 'content_start':
@@ -270,10 +280,40 @@ export function useChat(options: UseChatOptions = {}) {
   // Send a message
   const sendMessage = useCallback(
     async (content: string, file?: File) => {
+      // Wait for WebSocket to be ready
       if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
         connect();
-        setTimeout(() => sendMessage(content, file), 500);
-        return;
+
+        // Wait for connection with a promise instead of recursive setTimeout
+        const waitForConnection = new Promise<boolean>((resolve) => {
+          const checkInterval = setInterval(() => {
+            if (wsRef.current?.readyState === WebSocket.OPEN) {
+              clearInterval(checkInterval);
+              resolve(true);
+            }
+          }, 100);
+
+          // Timeout after 3 seconds
+          setTimeout(() => {
+            clearInterval(checkInterval);
+            resolve(false);
+          }, 3000);
+        });
+
+        const connected = await waitForConnection;
+        if (!connected) {
+          console.error('Failed to establish WebSocket connection');
+          setMessages((prev) => [
+            ...prev,
+            {
+              id: `msg_${Date.now()}`,
+              role: 'assistant',
+              content: 'Connection error. Please try again.',
+              timestamp: new Date(),
+            },
+          ]);
+          return;
+        }
       }
 
       let messageContent = content;
@@ -311,13 +351,41 @@ export function useChat(options: UseChatOptions = {}) {
 
       // Auto-create session if this is the first message
       if (isFirstMessage) {
-        const sessionExists = sessions.some((s) => s.id === currentSessionId);
-        if (!sessionExists) {
-          await createSessionMutation.mutateAsync({
-            sessionId: currentSessionId,
-            title: 'New Chat',
-          });
-          onNavigate?.(`/chat/${currentSessionId}`);
+        // Generate a fresh session ID for new chats from welcome page
+        const newSessionId = `session_${Date.now()}`;
+        setCurrentSessionId(newSessionId);
+        currentSessionIdRef.current = newSessionId;
+
+        await createSessionMutation.mutateAsync({
+          sessionId: newSessionId,
+          title: 'New Chat',
+        });
+
+        // Update URL without causing navigation/remount - this prevents WS disconnect
+        window.history.replaceState(null, '', `/chat/${newSessionId}`);
+
+        // Reconnect WebSocket with new session ID
+        disconnect();
+        connect();
+
+        // Wait for connection to be ready
+        const waitForReconnect = new Promise<boolean>((resolve) => {
+          const checkInterval = setInterval(() => {
+            if (wsRef.current?.readyState === WebSocket.OPEN) {
+              clearInterval(checkInterval);
+              resolve(true);
+            }
+          }, 100);
+          setTimeout(() => {
+            clearInterval(checkInterval);
+            resolve(false);
+          }, 3000);
+        });
+
+        const reconnected = await waitForReconnect;
+        if (!reconnected) {
+          console.error('Failed to reconnect WebSocket with new session');
+          return;
         }
       }
 
@@ -356,9 +424,9 @@ export function useChat(options: UseChatOptions = {}) {
     },
     [
       connect,
+      disconnect,
       currentSessionId,
       messages.length,
-      sessions,
       createSessionMutation,
       saveMessage,
       generateTitleMutation,
@@ -367,16 +435,13 @@ export function useChat(options: UseChatOptions = {}) {
     ]
   );
 
-  // Create new session (just resets state, navigates to welcome - session created on first message)
+  // Create new session - just navigate to welcome, everything else happens on first message
   const newSession = useCallback(() => {
-    const newId = `session_${Date.now()}`;
-    setCurrentSessionId(newId);
     setMessages([]);
-    autoGreetSentRef.current = false; // Reset greeting flag for new session
-    disconnect();
-    onNavigate?.(`/`); // Go to welcome page, not /chat/id
-    return newId;
-  }, [disconnect, onNavigate]);
+    autoGreetSentRef.current = false;
+    // Just navigate to welcome - session ID will be created fresh when message is sent
+    onNavigate?.(`/`);
+  }, [onNavigate]);
 
   // Load a session
   const loadSession = useCallback(

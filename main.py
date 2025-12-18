@@ -88,6 +88,12 @@ sanction_agent = Agent(
     db=db
 )
 
+# Default session state template (will be populated with customer data at runtime)
+DEFAULT_SESSION_STATE = {
+    "customer": None,  # Populated from DB when customer_id is provided
+    "step": "sales",   # Current step: sales | verification | underwriting | sanction
+}
+
 loan_sales_team = Team(
     name="Loan Sales Team",
     model=groq_model,
@@ -98,38 +104,20 @@ loan_sales_team = Team(
         sanction_agent
     ],
     instructions=[
-        "You are a digital loan assistant for an NBFC. You help customers get personal loans.",
-        "Customer talks only to you. Delegate to team members one step at a time.",
+        "You are a digital loan assistant for an NBFC. Help customers get personal loans.",
+        "Customer data is in session_state.customer (name, salary, credit_score, pre_approved_limit, etc).",
+        "Use customer_id from session_state for all tool calls. NEVER ask for customer ID.",
         "",
-        "CUSTOMER CONTEXT:",
-        "- If message has [SYSTEM CONTEXT: Customer identified...], the customer_id is already known.",
-        "- NEVER ask for customer ID - it's automatically provided for all tool calls.",
-        "- Just proceed with helping the customer with their loan.",
-        "",
-        "STEP-BY-STEP FLOW (must complete each step before next):",
-        "",
-        "STEP 1 - SALES:",
-        "- First, delegate to Sales Agent to discuss loan amount and calculate EMI",
-        "- Wait for customer to confirm the final loan terms",
-        "- Only proceed to Step 2 after customer confirms",
-        "",
-        "STEP 2 - VERIFICATION:",
-        "- Delegate to Verification Agent to check KYC",
-        "- Only proceed if KYC is verified",
-        "",
-        "STEP 3 - UNDERWRITING:",
-        "- Delegate to Underwriting Agent with loan amount and tenure",
-        "- If approved: proceed to Step 4",
-        "- If conditional (needs salary slip): ask customer to upload, then re-delegate",
-        "- If rejected: explain and end",
-        "",
-        "STEP 4 - SANCTION:",
-        "- Only after approval, delegate to Sanction Agent",
-        "- Present the sanction letter to customer",
-        "",
-        "IMPORTANT: Do ONE step at a time. Wait for each step to complete before starting the next.",
+        "FLOW (one step at a time):",
+        "1. SALES: Delegate to Sales Agent for loan terms and EMI. Wait for customer confirmation.",
+        "2. VERIFICATION: Delegate to Verification Agent for KYC check.",
+        "3. UNDERWRITING: Delegate to Underwriting Agent. Handle approved/conditional/rejected.",
+        "4. SANCTION: Only after approval, delegate to Sanction Agent for letter.",
     ],
     db=db,
+    session_state=DEFAULT_SESSION_STATE,
+    add_session_state_to_context=True,  # Agents see customer profile automatically
+    enable_agentic_state=True,          # Agents can UPDATE session_state (persisted to DB)
     add_history_to_context=True,
     show_members_responses=True,
     markdown=True,
