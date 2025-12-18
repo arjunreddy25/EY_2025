@@ -1,4 +1,3 @@
-import { useState, useEffect } from 'react';
 import { X, FileText, Download, CheckCircle2, Clock, Wallet } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -6,12 +5,10 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { Separator } from '@/components/ui/separator';
 import { cn } from '@/lib/utils';
 import { 
-  fetchCustomerLoans, 
-  fetchCustomerDocuments, 
-  getCurrentCustomerId,
-  type LoanApplication,
-  type CustomerDocuments 
-} from '@/api/chatApi';
+  useCustomerLoans,
+  useCustomerDocuments,
+  useCurrentCustomerId
+} from '@/hooks/useChatQueries';
 
 interface MyLoansDrawerProps {
   isOpen: boolean;
@@ -19,51 +16,31 @@ interface MyLoansDrawerProps {
 }
 
 export function MyLoansDrawer({ isOpen, onClose }: MyLoansDrawerProps) {
-  const [loans, setLoans] = useState<LoanApplication[]>([]);
-  const [documents, setDocuments] = useState<CustomerDocuments | null>(null);
-  const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [customerName, setCustomerName] = useState<string>('');
+  const customerId = useCurrentCustomerId();
 
-  useEffect(() => {
-    if (isOpen) {
-      loadData();
-    }
-  }, [isOpen]);
+  const {
+    data: loansData,
+    isLoading: loansLoading,
+    error: loansError
+  } = useCustomerLoans(isOpen ? customerId : null);
 
-  const loadData = async () => {
-    const customerId = getCurrentCustomerId();
-    if (!customerId) {
-      setError('Please log in to view your loans');
-      return;
-    }
+  const {
+    data: docsData,
+    isLoading: docsLoading
+  } = useCustomerDocuments(isOpen ? customerId : null);
 
-    setIsLoading(true);
-    setError(null);
-    
-    try {
-      const [loansData, docsData] = await Promise.all([
-        fetchCustomerLoans(customerId),
-        fetchCustomerDocuments(customerId)
-      ]);
-      
-      setLoans(loansData.loans);
-      setDocuments(docsData.documents);
-      setCustomerName(loansData.customer_name);
-    } catch (err) {
-      setError('Failed to load loan data');
-      console.error('Error loading loans:', err);
-    } finally {
-      setIsLoading(false);
-    }
-  };
+  const isLoading = loansLoading || docsLoading;
+  const loans = loansData?.loans || [];
+  const documents = docsData?.documents || null;
+  const customerName = loansData?.customerName || docsData?.customerName || '';
 
   const formatCurrency = (amount: number) => {
     return `Rs. ${amount.toLocaleString('en-IN')}`;
   };
 
-  const formatDate = (dateStr: string) => {
-    return new Date(dateStr).toLocaleDateString('en-IN', {
+  const formatDate = (date: Date | string) => {
+    const d = date instanceof Date ? date : new Date(date);
+    return d.toLocaleDateString('en-IN', {
       day: 'numeric',
       month: 'short',
       year: 'numeric'
@@ -114,14 +91,14 @@ export function MyLoansDrawer({ isOpen, onClose }: MyLoansDrawerProps) {
             )}
 
             {/* Error State */}
-            {error && (
+            {loansError && !customerId && (
               <div className="text-center py-12">
-                <p className="text-muted-foreground">{error}</p>
+                <p className="text-muted-foreground">Please log in to view your loans</p>
               </div>
             )}
 
             {/* Salary Slip Verification Status */}
-            {!isLoading && !error && documents && (
+            {!isLoading && documents && (
               <div>
                 <h3 className="text-sm font-medium text-muted-foreground mb-3">Salary Verification</h3>
                 <div className={cn(
@@ -150,7 +127,7 @@ export function MyLoansDrawer({ isOpen, onClose }: MyLoansDrawerProps) {
                       <Button 
                         variant="ghost" 
                         size="sm"
-                        onClick={() => window.open(documents.salary_slip.url, '_blank')}
+                        onClick={() => window.open(documents.salary_slip.url!, '_blank')}
                       >
                         <Download className="size-4 mr-1" />
                         View
@@ -164,7 +141,7 @@ export function MyLoansDrawer({ isOpen, onClose }: MyLoansDrawerProps) {
             <Separator />
 
             {/* Sanctioned Loans */}
-            {!isLoading && !error && (
+            {!isLoading && (
               <div>
                 <h3 className="text-sm font-medium text-muted-foreground mb-3">
                   Sanctioned Loans ({loans.length})
@@ -202,7 +179,7 @@ export function MyLoansDrawer({ isOpen, onClose }: MyLoansDrawerProps) {
                             <span className="font-medium">{formatCurrency(loan.monthly_emi)}</span>
                           </div>
                           <span className="text-xs text-muted-foreground">
-                            {formatDate(loan.created_at)}
+                            {formatDate(loan.createdAt)}
                           </span>
                         </div>
 

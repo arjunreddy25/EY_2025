@@ -166,3 +166,69 @@ export function useGenerateTitle() {
         },
     });
 }
+
+// ============================================
+// Customer Loans & Documents Queries
+// ============================================
+
+import {
+    fetchCustomerLoans,
+    fetchCustomerDocuments,
+    getCurrentCustomerId,
+    type LoanApplication,
+    type CustomerDocuments,
+} from '@/api/chatApi';
+
+// Query keys for loans
+export const loanKeys = {
+    all: ['loans'] as const,
+    customer: (customerId: string) => [...loanKeys.all, 'customer', customerId] as const,
+    documents: (customerId: string) => [...loanKeys.all, 'documents', customerId] as const,
+};
+
+/**
+ * Hook to fetch customer loans
+ */
+export function useCustomerLoans(customerId: string | null) {
+    return useQuery({
+        queryKey: loanKeys.customer(customerId || ''),
+        queryFn: () => (customerId ? fetchCustomerLoans(customerId) : null),
+        enabled: !!customerId,
+        select: (data) => {
+            if (!data) return null;
+            return {
+                customerName: data.customer_name,
+                loans: data.loans.map((loan: LoanApplication) => ({
+                    ...loan,
+                    createdAt: loan.created_at ? new Date(loan.created_at) : new Date(),
+                })),
+                totalLoans: data.total_loans,
+            };
+        },
+    });
+}
+
+/**
+ * Hook to fetch customer documents (salary slips + sanction letters)
+ */
+export function useCustomerDocuments(customerId: string | null) {
+    return useQuery({
+        queryKey: loanKeys.documents(customerId || ''),
+        queryFn: () => (customerId ? fetchCustomerDocuments(customerId) : null),
+        enabled: !!customerId,
+        select: (data) => {
+            if (!data) return null;
+            return {
+                customerName: data.customer_name,
+                documents: data.documents as CustomerDocuments,
+            };
+        },
+    });
+}
+
+/**
+ * Helper hook to get current customer ID from localStorage
+ */
+export function useCurrentCustomerId(): string | null {
+    return getCurrentCustomerId();
+}
