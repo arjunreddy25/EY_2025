@@ -3,7 +3,8 @@ import { useNavigate } from 'react-router-dom';
 import { Sidebar } from './Sidebar';
 import { ChatArea } from './ChatArea';
 import { ChatInput } from './ChatInput';
-import { LoginPage } from './LoginPage';
+import { PhoneVerification } from './PhoneVerification';
+import { KYCDialog } from './KYCDialog';
 import { AgentActivityDialog } from './AgentActivityDialog';
 import { Button } from '@/components/ui/button';
 import { Activity } from 'lucide-react';
@@ -14,6 +15,7 @@ interface User {
   email: string;
   name?: string;
   customer_id?: string;
+  phone?: string;
 }
 
 export function ChatLayout({ chatId }: { chatId?: string } = {}) {
@@ -26,7 +28,8 @@ export function ChatLayout({ chatId }: { chatId?: string } = {}) {
       return {
         email: customerData.email,
         name: customerData.name,
-        customer_id: customerData.customer_id
+        customer_id: customerData.customer_id,
+        phone: customerData.phone
       };
     }
 
@@ -34,8 +37,10 @@ export function ChatLayout({ chatId }: { chatId?: string } = {}) {
     const savedUser = localStorage.getItem('user');
     return savedUser ? JSON.parse(savedUser) : null;
   });
-  const [loginError, setLoginError] = useState<string | null>(null);
-  const [loginLoading, setLoginLoading] = useState(false);
+
+  // KYC dialog state for new users
+  const [kycDialogOpen, setKycDialogOpen] = useState(false);
+  const [pendingPhone, setPendingPhone] = useState('');
 
   const { resolvedTheme, toggleTheme } = useTheme();
   const navigate = useNavigate();
@@ -63,17 +68,21 @@ export function ChatLayout({ chatId }: { chatId?: string } = {}) {
     sendMessage(suggestion);
   }, [sendMessage]);
 
-  const handleLogin = useCallback((email: string, _password: string) => {
-    setLoginLoading(true);
-    setLoginError(null);
+  const handleVerified = useCallback((customer: { customer_id: string; name: string; email: string; phone: string }) => {
+    setUser({
+      email: customer.email,
+      name: customer.name,
+      customer_id: customer.customer_id,
+      phone: customer.phone
+    });
+    // Reload page to reinitialize chat with customer context
+    window.location.reload();
+  }, []);
 
-    // Simulate login delay
-    setTimeout(() => {
-      const userData = { email };
-      setUser(userData);
-      localStorage.setItem('user', JSON.stringify(userData));
-      setLoginLoading(false);
-    }, 800);
+  const handleNewUser = useCallback((phone: string) => {
+    // Open KYC dialog for new users
+    setPendingPhone(phone);
+    setKycDialogOpen(true);
   }, []);
 
   const handleLogout = useCallback(() => {
@@ -81,17 +90,6 @@ export function ChatLayout({ chatId }: { chatId?: string } = {}) {
     localStorage.removeItem('user');
     localStorage.removeItem('customer');
   }, []);
-
-  // Show login page if not authenticated
-  if (!user) {
-    return (
-      <LoginPage
-        onLogin={handleLogin}
-        isLoading={loginLoading}
-        error={loginError}
-      />
-    );
-  }
 
   return (
     <div className="flex h-screen overflow-hidden bg-background">
@@ -141,10 +139,19 @@ export function ChatLayout({ chatId }: { chatId?: string } = {}) {
           onSuggestionClick={handleSuggestionClick}
         />
 
-        {/* Chat Input */}
+        {/* Phone Verification - show if no user */}
+        {!user && (
+          <PhoneVerification
+            onVerified={handleVerified}
+            onNewUser={handleNewUser}
+          />
+        )}
+
+        {/* Chat Input - only enabled if user is verified */}
         <ChatInput
           onSend={sendMessage}
           isLoading={isLoading}
+          disabled={!user}
         />
       </div>
 
@@ -153,6 +160,13 @@ export function ChatLayout({ chatId }: { chatId?: string } = {}) {
         isOpen={activityDialogOpen}
         onClose={() => setActivityDialogOpen(false)}
         decisions={agentDecisions}
+      />
+
+      {/* KYC Dialog for new users */}
+      <KYCDialog
+        isOpen={kycDialogOpen}
+        onClose={() => setKycDialogOpen(false)}
+        phone={pendingPhone}
       />
     </div>
   );

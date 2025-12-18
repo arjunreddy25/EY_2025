@@ -15,7 +15,7 @@ export function ChatArea({
   messages, 
   isLoading, 
   currentToolCall,
-  onSuggestionClick 
+  onSuggestionClick
 }: ChatAreaProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -55,3 +55,5 @@ export function ChatArea({
     </div>
   );
 }
+
+

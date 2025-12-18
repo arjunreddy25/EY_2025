@@ -147,6 +147,23 @@ def get_customer_by_email(email: str) -> Optional[Dict[str, Any]]:
             return customer
 
 
+def get_customer_by_phone(phone: str) -> Optional[Dict[str, Any]]:
+    """Fetch a customer by phone number."""
+    with get_db() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT * FROM customers WHERE phone = %s",
+                (phone,)
+            )
+            customer = cur.fetchone()
+            
+            if customer:
+                customer = dict(customer)
+                customer['existing_loans'] = get_existing_loans(customer['customer_id'])
+                
+            return customer
+
+
 def delete_customer(customer_id: str) -> bool:
     """
     Delete a customer and all related data (loans, links).

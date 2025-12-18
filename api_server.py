@@ -36,6 +36,8 @@ from main import loan_sales_team
 from db_neon import (
     get_customer,
     get_all_customers,
+    get_customer_by_email,
+    get_customer_by_phone,
     create_customer_link,
     get_all_links,
     verify_customer_link,
@@ -476,6 +478,81 @@ async def verify_reference_link(ref: str):
         "customer_id": customer["customer_id"],
         "email": customer["email"],
         "name": customer["name"]
+    }
+
+
+class LookupRequest(BaseModel):
+    email: Optional[str] = None
+    phone: Optional[str] = None
+
+
+@app.post("/auth/lookup")
+async def lookup_customer(request: LookupRequest):
+    """
+    Lookup customer by email or phone number.
+    Returns customer info if found, or exists=False if not found.
+    """
+    customer = None
+    
+    if request.email:
+        customer = get_customer_by_email(request.email.strip().lower())
+    elif request.phone:
+        # Normalize phone (remove spaces, dashes)
+        phone = request.phone.strip().replace(" ", "").replace("-", "")
+        customer = get_customer_by_phone(phone)
+    else:
+        raise HTTPException(status_code=400, detail="Email or phone required")
+    
+    if customer:
+        return {
+            "exists": True,
+            "customer_id": customer["customer_id"],
+            "name": customer.get("name"),
+            "email": customer.get("email")
+        }
+    
+    return {"exists": False}
+
+
+# Create KYC uploads directory
+KYC_UPLOADS_DIR = pathlib.Path(__file__).parent.resolve() / "uploads" / "kyc"
+KYC_UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
+
+
+@app.post("/upload/kyc-document")
+async def upload_kyc_document(file: UploadFile = File(...)):
+    """
+    Upload KYC document (Aadhar, PAN, etc.) for new users.
+    Just stores the file - NO processing by agents.
+    Used for new customer onboarding before bank KYC.
+    """
+    # Validate file type
+    allowed_types = {".png", ".jpg", ".jpeg", ".webp", ".pdf"}
+    suffix = pathlib.Path(file.filename).suffix.lower()
+    if suffix not in allowed_types:
+        raise HTTPException(
+            status_code=400, 
+            detail=f"Unsupported file type. Allowed: {', '.join(allowed_types)}"
+        )
+    
+    # Generate unique filename
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    safe_filename = f"kyc_{timestamp}{suffix}"
+    file_path = KYC_UPLOADS_DIR / safe_filename
+    
+    # Save file
+    try:
+        with open(file_path, "wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
+    finally:
+        file.file.close()
+    
+    print(f"📤 KYC document uploaded: {file_path}")
+    
+    return {
+        "status": "uploaded",
+        "filename": safe_filename,
+        "message": "Document received. Our team will contact you for KYC verification."
     }
 
 
