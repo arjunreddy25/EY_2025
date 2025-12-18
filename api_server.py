@@ -209,11 +209,9 @@ def send_smtp_email(to_email: str, customer_name: str, ref_link: str, pre_approv
         msg["From"] = SMTP_EMAIL
         msg["To"] = to_email
         
-        msg.attach(MIMEText(html_content, "html"))
-        
-        print(f"📤 Connecting to SMTP server {SMTP_HOST}:{SMTP_PORT}...")
-        with smtplib.SMTP(SMTP_HOST, SMTP_PORT) as server:
-            server.starttls()
+        print(f"DTO Connecting to SMTP server {SMTP_HOST}:465 (SSL)...")
+        # Try SSL connection on port 465
+        with smtplib.SMTP_SSL(SMTP_HOST, 465) as server:
             print(f"🔐 Logging in as {SMTP_EMAIL}...")
             server.login(SMTP_EMAIL, APP_PASSWORD)
             server.sendmail(SMTP_EMAIL, to_email, msg.as_string())
