@@ -414,6 +414,10 @@ export function useChat(options: UseChatOptions = {}) {
 
       // Get customer info and send to WebSocket (send full message with file path)
       const customer = getCustomerInfo();
+      if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
+        console.error('WebSocket not ready when trying to send message');
+        return;
+      }
       wsRef.current.send(
         JSON.stringify({
           message: messageContent,
