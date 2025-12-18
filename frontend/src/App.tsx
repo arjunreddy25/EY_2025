@@ -70,6 +70,9 @@ function RefVerifier() {
               console.warn('Could not create session:', e);
             }
 
+            // Signal to React Query that sessions cache needs refresh
+            localStorage.setItem('newSessionToRefetch', newSessionId);
+
             // Navigate to the new chat
             navigate(`/chat/${newSessionId}`, { replace: true });
           }

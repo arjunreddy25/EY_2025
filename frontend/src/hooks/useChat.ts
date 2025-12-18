@@ -99,6 +99,15 @@ export function useChat(options: UseChatOptions = {}) {
   const saveMessageMutation = useSaveMessage();
   const generateTitleMutation = useGenerateTitle();
 
+  // Check if we need to refetch sessions (e.g., after email redirect created a session)
+  useEffect(() => {
+    const needsRefetch = localStorage.getItem('newSessionToRefetch');
+    if (needsRefetch) {
+      localStorage.removeItem('newSessionToRefetch');
+      queryClient.invalidateQueries({ queryKey: chatKeys.sessions() });
+    }
+  }, [queryClient]);
+
   // Get customer info from localStorage
   const getCustomerInfo = useCallback(() => {
     try {
@@ -429,10 +438,12 @@ export function useChat(options: UseChatOptions = {}) {
       // Save user message (full content with system context)
       saveMessage('user', messageContent);
 
-      // Generate AI title for first message
-      if (isFirstMessage) {
+      // Generate AI title based on first USER message (not AI greeting)
+      // Count user messages to handle email redirect scenario where AI greeting comes first
+      const userMessageCount = messages.filter(m => m.role === 'user').length;
+      if (userMessageCount === 0) {
         generateTitleMutation.mutate({
-          sessionId: currentSessionId,
+          sessionId: currentSessionIdRef.current,
           message: content,
         });
       }
