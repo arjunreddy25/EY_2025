@@ -11,7 +11,7 @@ from agno.models.groq import Groq
 from agno.db.postgres import PostgresDb
 
 # Agno Guardrails for security
-from agno.guardrails import PromptInjectionGuardrail
+from agno.guardrails import PromptInjectionGuardrail, PIIDetectionGuardrail
 
 from tools import fetch_preapproved_offer, calculate_emi, fetch_kyc_from_crm, fetch_credit_score, validate_loan_eligibility, generate_sanction_letter
 from prompts import SALES_AGENT_PROMPT, VERIFICATION_AGENT_PROMPT, UNDERWRITING_AGENT_PROMPT, SANCTION_AGENT_PROMPT
@@ -137,8 +137,8 @@ loan_sales_team = Team(
     show_members_responses=True,
     markdown=True,
     share_member_interactions=True,
-    # Agno Guardrails: Protect against prompt injection and jailbreaking
-    pre_hooks=[PromptInjectionGuardrail()]
+    # Agno Guardrails: Protect against prompt injection and PII leakage
+    pre_hooks=[PromptInjectionGuardrail(), PIIDetectionGuardrail()]
 )
 
 
