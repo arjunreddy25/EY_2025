@@ -56,7 +56,7 @@ export function WelcomeScreen({ onSuggestionClick }: WelcomeScreenProps) {
               onClick={() => onSuggestionClick?.(suggestion.prompt)}
               className={cn(
                 "group h-auto flex-col items-start gap-2 p-4 text-left",
-                "hover:bg-accent hover:shadow-md transition-all duration-200"
+                "cursor-pointer hover:bg-accent hover:shadow-md transition-all duration-200"
               )}
             >
               <div className="flex items-center gap-2">

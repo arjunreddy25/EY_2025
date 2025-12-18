@@ -99,7 +99,7 @@ export function Sidebar({
               <Button
                 onClick={onNewChat}
                 className={cn(
-                  "w-full gap-2 bg-primary text-primary-foreground hover:bg-primary/90 shadow-sm",
+                  "cursor-pointer w-full gap-2 bg-primary text-primary-foreground hover:bg-primary/90 shadow-sm",
                   !isOpen && "justify-center px-0"
                 )}
               >
