@@ -258,54 +258,37 @@ def calculate_emi(
 
 
 
-CRM_BASE_URL = "http://localhost:8001"
-
+# CRM functionality merged - no separate server needed
+# KYC data is fetched directly from the database
 
 @tool
 def fetch_kyc_from_crm(customer_id: str) -> str:
     """
-    Fetch customer KYC details from CRM server.
+    Fetch customer KYC details from database (mock CRM).
+    This simulates fetching from a CRM server but uses direct DB access.
     """
     try:
-        response = requests.get(f"{CRM_BASE_URL}/kyc/{customer_id}", timeout=5)
-    except requests.exceptions.Timeout:
+        customer = load_customer_data().get(customer_id)
+        
+        if not customer:
+            return json.dumps({
+                "status": "error",
+                "message": f"Customer {customer_id} not found in CRM"
+            })
+        
+        return json.dumps({
+            "status": "success",
+            "customer_id": customer_id,
+            "name": customer.get("name", "Unknown"),
+            "phone": customer.get("phone", "Unknown"),
+            "address": customer.get("address", "Unknown"),
+            "kyc_verified": True  # Mock: Always verified in demo
+        })
+    except Exception as e:
         return json.dumps({
             "status": "error",
-            "message": "CRM server request timed out"
+            "message": f"Error fetching KYC details: {str(e)}"
         })
-    except requests.exceptions.ConnectionError:
-        return json.dumps({
-            "status": "error",
-            "message": "Unable to connect to CRM server. Please ensure the server is running."
-        })
-    except requests.exceptions.RequestException as e:
-        return json.dumps({
-            "status": "error",
-            "message": f"Network error while fetching KYC details: {str(e)}"
-        })
-
-    if response.status_code != 200:
-        return json.dumps({
-            "status": "error",
-            "message": f"Unable to fetch KYC details (HTTP {response.status_code})"
-        })
-
-    try:
-        data = response.json()
-    except json.JSONDecodeError:
-        return json.dumps({
-            "status": "error",
-            "message": "Invalid response format from CRM server"
-        })
-
-    return json.dumps({
-        "status": "success",
-        "customer_id": customer_id,
-        "name": data["name"],
-        "phone": data["phone"],
-        "address": data["address"],
-        "kyc_verified": data["kyc_verified"]
-    })
 
 
 
