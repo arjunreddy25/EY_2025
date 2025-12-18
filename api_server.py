@@ -13,6 +13,7 @@ import traceback
 # Ensure uploads directory exists
 import pathlib
 import shutil
+import requests
 
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
@@ -58,10 +59,9 @@ from db_neon import (
 load_dotenv()
 
 # Email Configuration
-SMTP_HOST = os.getenv("SMTP_HOST", "smtp.gmail.com")
-SMTP_PORT = int(os.getenv("SMTP_PORT", 587))
-SMTP_EMAIL = os.getenv("SMTP_EMAIL")
-APP_PASSWORD = os.getenv("APP_PASSWORD")
+# Email Configuration - Google Script Relay
+GOOGLE_SCRIPT_URL = os.getenv("GOOGLE_SCRIPT_URL")
+# Removed SMTP config as we are using Google Script Relay due to blocked ports
 FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:5173")
 UPLOADS_DIR = pathlib.Path(__file__).parent.resolve() / "uploads"
 UPLOADS_DIR.mkdir(exist_ok=True)
@@ -162,13 +162,13 @@ class ChatSessionResponse(BaseModel):
     last_message_preview: Optional[str] = None
 
 
-def send_smtp_email(to_email: str, customer_name: str, ref_link: str, pre_approved_limit: float, subject: str) -> dict:
-    """Send email via SMTP with Gmail App Password."""
-    print(f"📧 Attempting to send email to: {to_email}")
+def send_via_google_script(to_email: str, customer_name: str, ref_link: str, pre_approved_limit: float, subject: str) -> dict:
+    """Send email via Google Apps Script Web App (Bypasses SMTP ports)."""
+    print(f"📧 Attempting to send email to: {to_email} via Google Script")
     
-    if not SMTP_EMAIL or not APP_PASSWORD:
-        print(f"❌ Email config missing - SMTP_EMAIL: {bool(SMTP_EMAIL)}, APP_PASSWORD: {bool(APP_PASSWORD)}")
-        return {"status": "error", "message": "SMTP_EMAIL or APP_PASSWORD not configured"}
+    if not GOOGLE_SCRIPT_URL:
+        print("❌ GOOGLE_SCRIPT_URL not configured")
+        return {"status": "error", "message": "GOOGLE_SCRIPT_URL not configured"}
     
     html_content = f"""
     <html>
@@ -204,23 +204,25 @@ def send_smtp_email(to_email: str, customer_name: str, ref_link: str, pre_approv
     """
     
     try:
-        msg = MIMEMultipart("alternative")
-        msg["Subject"] = subject
-        msg["From"] = SMTP_EMAIL
-        msg["To"] = to_email
+        response = requests.post(
+            GOOGLE_SCRIPT_URL,
+            json={
+                "to": to_email,
+                "subject": subject,
+                "htmlBody": html_content
+            },
+            timeout=10
+        )
         
-        print(f"DTO Connecting to SMTP server {SMTP_HOST}:465 (SSL)...")
-        # Try SSL connection on port 465
-        with smtplib.SMTP_SSL(SMTP_HOST, 465) as server:
-            print(f"🔐 Logging in as {SMTP_EMAIL}...")
-            server.login(SMTP_EMAIL, APP_PASSWORD)
-            server.sendmail(SMTP_EMAIL, to_email, msg.as_string())
-        
-        print(f"✅ Email sent successfully to {to_email}")
-        return {"status": "sent", "message": "Email sent successfully"}
+        if response.status_code == 200:
+            print(f"✅ Email sent successfully to {to_email}")
+            return {"status": "sent", "message": "Email sent successfully"}
+        else:
+            print(f"❌ Script returned error: {response.text}")
+            return {"status": "error", "message": f"Script error: {response.text}"}
+            
     except Exception as e:
-        print(f"❌ Email failed to {to_email}: {e}")
-        traceback.print_exc()
+        print(f"❌ Connection failed to Google Script: {e}")
         return {"status": "error", "message": str(e)}
 
 
@@ -553,7 +555,7 @@ async def send_customer_email(
     
     # Send email in background - returns immediately to user
     background_tasks.add_task(
-        send_smtp_email,
+        send_via_google_script,
         to_email=customer.get("email"),
         customer_name=customer.get("name", "Customer"),
         ref_link=link,
@@ -630,7 +632,7 @@ async def send_batch_emails(request: SendEmailRequest = None):
                 continue
             
             link = f"{FRONTEND_URL}?ref={ref_id}"
-            email_result = send_smtp_email(
+            email_result = send_via_google_script(
                 to_email=customer.get("email"),
                 customer_name=customer.get("name", "Customer"),
                 ref_link=link,
