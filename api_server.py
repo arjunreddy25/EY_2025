@@ -21,7 +21,7 @@ from typing import Optional, List
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, File, UploadFile
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, File, UploadFile, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -526,8 +526,15 @@ async def generate_customer_link_endpoint(customer_id: str, expires_hours: int =
 
 
 @app.post("/crm/send-email/{customer_id}")
-async def send_customer_email(customer_id: str, subject: str = "Your Pre-Approved Loan Offer is Ready! 🎉"):
-    """Generate link and send email to a single customer via SMTP."""
+async def send_customer_email(
+    customer_id: str,
+    background_tasks: BackgroundTasks,
+    subject: str = "Your Pre-Approved Loan Offer is Ready! 🎉"
+):
+    """
+    Generate link and send email to a single customer via SMTP.
+    Email is sent in the background for faster response.
+    """
     customer = get_customer(customer_id)
     if not customer:
         raise HTTPException(status_code=404, detail="Customer not found")
@@ -538,7 +545,9 @@ async def send_customer_email(customer_id: str, subject: str = "Your Pre-Approve
     
     link = f"{FRONTEND_URL}?ref={ref_id}"
     
-    result = send_smtp_email(
+    # Send email in background - returns immediately to user
+    background_tasks.add_task(
+        send_smtp_email,
         to_email=customer.get("email"),
         customer_name=customer.get("name", "Customer"),
         ref_link=link,
@@ -551,7 +560,8 @@ async def send_customer_email(customer_id: str, subject: str = "Your Pre-Approve
         "email": customer.get("email"),
         "link": link,
         "ref_id": ref_id,
-        **result
+        "status": "queued",
+        "message": "Email is being sent in the background"
     }
 
 
