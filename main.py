@@ -13,7 +13,7 @@ from agno.db.postgres import PostgresDb
 # Agno Guardrails for security
 from agno.guardrails import PromptInjectionGuardrail, PIIDetectionGuardrail
 
-from tools import fetch_preapproved_offer, calculate_emi, fetch_kyc_from_crm, fetch_credit_score, validate_loan_eligibility, generate_sanction_letter
+from tools import fetch_preapproved_offer, calculate_emi, explore_loan_options, fetch_kyc_from_crm, fetch_credit_score, validate_loan_eligibility, generate_sanction_letter
 from prompts import SALES_AGENT_PROMPT, VERIFICATION_AGENT_PROMPT, UNDERWRITING_AGENT_PROMPT, SANCTION_AGENT_PROMPT
 from db_neon import get_all_customers
 
@@ -60,7 +60,7 @@ sales_agent = Agent(
     role="Greet customer, discuss loan amount, calculate EMI options, confirm choice",
     model=groq_model,
     instructions=[SALES_AGENT_PROMPT],
-    tools=[calculate_emi],
+    tools=[explore_loan_options, calculate_emi],
     db=db
 )
 
@@ -119,25 +119,12 @@ loan_sales_team = Team(
         sanction_agent
     ],
     instructions=[
-        "You are a loan assistant. Customer data is in session_state.customer (name, pre_approved_limit, etc).",
+        "You are the Master Agent - the main orchestrator for a personal loan sales process.",
+        "You manage the conversation flow with the customer, engage them in a personalized manner, and coordinate the loan process.",
+        "Customer data is in session_state.customer.",
         "",
-        "WORKFLOW - Follow this exact order:",
-        "",
-        "1. SALES AGENT: Delegate FIRST. Agent will greet, discuss amount, show EMI options.",
-        "   TRIGGER: Any loan inquiry or start of conversation.",
-        "   WAIT: Until customer confirms amount + tenure choice.",
-        "",
-        "2. VERIFICATION AGENT: Delegate after customer confirms loan choice.",
-        "   TRIGGER: Customer says 'yes', 'I'll take it', selects an option, or confirms.",
-        "",
-        "3. UNDERWRITING AGENT: Delegate after KYC is verified.",
-        "   TRIGGER: Verification Agent reports 'KYC verified'.",
-        "   NOTE: If 'conditional_approval', wait for salary slip upload.",
-        "",
-        "4. SANCTION AGENT: Delegate only after loan is approved.",
-        "   TRIGGER: Underwriting Agent reports 'approved'.",
-        "",
-        "RULES: Never skip steps. Wait for user response between major steps.",
+        "Your team: Sales Agent (loan terms), Verification Agent (KYC), Underwriting Agent (eligibility), Sanction Agent (PDF letter).",
+        "Hand over tasks to the appropriate agent and coordinate until the loan is sanctioned or rejected.",
     ],
     db=db,
     session_state=DEFAULT_SESSION_STATE,
@@ -145,7 +132,7 @@ loan_sales_team = Team(
     enable_agentic_state=True,          # Agents can UPDATE session_state (persisted to DB)
     add_history_to_context=True,
     show_members_responses=True,
-    markdown=True,
+    # markdown=True,
     share_member_interactions=True,
     # Agno Guardrails: Protect against prompt injection and PII leakage
     pre_hooks=[PromptInjectionGuardrail(), PIIDetectionGuardrail()]

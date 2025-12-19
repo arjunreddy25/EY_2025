@@ -1,7 +1,7 @@
 import { cn } from '@/lib/utils';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Button } from '@/components/ui/button';
-import { Copy, Check, Download } from 'lucide-react';
+import { Copy, Check, Download, Loader2 } from 'lucide-react';
 import { useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import type { Message } from '@/hooks/useChat';
@@ -9,10 +9,16 @@ import { TypingIndicator } from './TypingIndicator';
 
 interface MessageBubbleProps {
   message: Message;
+  agentStatus?: string | null;
 }
 
+// Format tool name for display - show exactly what's happening
+function formatToolName(toolName: string): string {
+  // Just clean up the tool name, don't hide anything
+  return toolName.replace(/_/g, ' ');
+}
 
-export function MessageBubble({ message }: MessageBubbleProps) {
+export function MessageBubble({ message, agentStatus }: MessageBubbleProps) {
   const [copied, setCopied] = useState(false);
   const isUser = message.role === 'user';
 
@@ -21,6 +27,14 @@ export function MessageBubble({ message }: MessageBubbleProps) {
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
+
+  // Get current tool being executed (show ALL tools, no filtering)
+  const currentTool = message.toolCalls?.find(tc => tc.status === 'started');
+
+  // Build status text: current tool with agent > agentStatus > null
+  const streamingStatus = currentTool
+    ? `${formatToolName(currentTool.tool)}${currentTool.agent ? ` (${currentTool.agent})` : ''}`
+    : agentStatus;
 
   return (
     <div
@@ -48,7 +62,8 @@ export function MessageBubble({ message }: MessageBubbleProps) {
           {/* Message content or typing indicator */}
           {message.isStreaming && !message.content ? (
             <TypingIndicator
-              toolName={message.toolCalls?.find(tc => tc.status === 'started')?.tool}
+              toolName={currentTool?.tool}
+              statusText={agentStatus}
             />
           ) : isUser ? (
             <div className="whitespace-pre-wrap break-words">
@@ -62,6 +77,14 @@ export function MessageBubble({ message }: MessageBubbleProps) {
               {message.isStreaming && (
                 <span className="ml-1 inline-block h-4 w-1 animate-pulse bg-current" />
               )}
+            </div>
+          )}
+
+          {/* Streaming status line - shows current activity during streaming */}
+          {message.isStreaming && message.content && streamingStatus && (
+            <div className="mt-2 pt-2 border-t border-border/50 flex items-center gap-2 text-xs text-muted-foreground">
+              <Loader2 className="size-3 animate-spin" />
+              <span>{streamingStatus}...</span>
             </div>
           )}
         </div>

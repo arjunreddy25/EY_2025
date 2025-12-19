@@ -3,18 +3,19 @@ import { Loader2 } from 'lucide-react';
 
 interface TypingIndicatorProps {
   toolName?: string | null;
+  statusText?: string | null;
   className?: string;
 }
 
-export function TypingIndicator({ toolName, className }: TypingIndicatorProps) {
-  // Show actual tool being executed, or just "Processing..." if no tool
-  const statusText = toolName ? formatToolName(toolName) : 'Processing...';
+export function TypingIndicator({ toolName, statusText, className }: TypingIndicatorProps) {
+  // Priority: statusText > toolName > 'Processing...'
+  const displayText = statusText || (toolName ? formatToolName(toolName) : 'Processing...');
 
   return (
-    <div className={cn("flex items-center gap-2", className)}>
+    <div className={cn("flex items-center gap-2 px-4 py-2", className)}>
       <Loader2 className="size-4 animate-spin text-primary" />
       <span className="text-sm text-muted-foreground">
-        {statusText}
+        {displayText}
       </span>
     </div>
   );
@@ -32,3 +33,4 @@ function formatToolName(toolName: string): string {
 
   return toolLabels[toolName] || `Running ${toolName.replace(/_/g, ' ')}...`;
 }
+

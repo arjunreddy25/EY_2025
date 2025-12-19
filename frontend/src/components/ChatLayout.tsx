@@ -136,6 +136,7 @@ export function ChatLayout({ chatId }: { chatId?: string } = {}) {
           messages={messages}
           isLoading={isLoading}
           currentToolCall={currentToolCall}
+          latestAgentStatus={agentDecisions.length > 0 ? agentDecisions[agentDecisions.length - 1].summary : null}
           onSuggestionClick={handleSuggestionClick}
         />
 

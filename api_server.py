@@ -995,6 +995,13 @@ async def chat_stream_endpoint(
                 # Stream content tokens
                 if run_output_event.event == TeamRunEvent.run_content:
                     if hasattr(run_output_event, 'content') and run_output_event.content:
+                        # Check if content comes from a member agent
+                        agent_id = getattr(run_output_event, 'agent_id', None)
+                        if agent_id and agent_id not in agents_seen:
+                            agents_seen.add(agent_id)
+                            # Emit delegation event for this agent
+                            yield f"data: {json.dumps({'type': 'agent_decision', 'agent': 'Master Agent', 'decision_type': 'DELEGATION', 'details': f'Delegating to {agent_id}', 'summary': f'Handing off to {agent_id}'})}\n\n"
+                        
                         if not content_started:
                             yield f"data: {json.dumps({'type': 'content_start'})}\n\n"
                             content_started = True
@@ -1020,6 +1027,26 @@ async def chat_stream_endpoint(
                     if agent_id not in agents_seen:
                         agents_seen.add(agent_id)
                         yield f"data: {json.dumps({'type': 'agent_decision', 'agent': 'Master Agent', 'decision_type': 'DELEGATION', 'details': f'Delegating to {agent_id}', 'summary': f'Handing off to {agent_id}'})}\n\n"
+                    
+                    # Emit immediate 'working' status for known tools
+                    tool_status_map = {
+                        'calculate_emi': ('Sales Agent', 'Calculating EMI options'),
+                        'fetch_kyc_from_crm': ('Verification Agent', 'Verifying identity'),
+                        'validate_loan_eligibility': ('Underwriting Agent', 'Checking loan eligibility'),
+                        'generate_sanction_letter': ('Sanction Agent', 'Creating sanction letter'),
+                        'fetch_credit_score': ('Underwriting Agent', 'Checking credit score'),
+                        'fetch_preapproved_offer': ('Sales Agent', 'Loading offer details'),
+                    }
+                    if tool_name in tool_status_map:
+                        agent_name, status_text = tool_status_map[tool_name]
+                        decision = {
+                            'type': 'agent_decision',
+                            'agent': agent_name,
+                            'decision_type': 'AGENT_WORKING',
+                            'details': f'Running {tool_name}',
+                            'summary': status_text
+                        }
+                        yield f"data: {json.dumps(decision)}\n\n"
                 
                 elif run_output_event.event == RunEvent.tool_call_completed:
                     agent_id = getattr(run_output_event, 'agent_id', 'unknown')
@@ -1033,8 +1060,31 @@ async def chat_stream_endpoint(
                         try:
                             result_data = json.loads(result_str)
                             
+                            # Explore Loan Options completed (Sales Agent)
+                            if tool_name == 'explore_loan_options':
+                                if result_data.get('status') == 'success':
+                                    pre_limit = result_data.get('pre_approved_limit', 0)
+                                    loan_amt = result_data.get('loan_amount', 0)
+                                    options = result_data.get('options', [])
+                                    
+                                    # Build summary of options
+                                    if options:
+                                        opt_summary = ', '.join([f"{o['tenure_months']}mo @ {o['interest_rate']}%" for o in options[:3]])
+                                        details = f'Pre-approved: Rs.{pre_limit:,.0f}, Amount: Rs.{loan_amt:,.0f} | Options: {opt_summary}...'
+                                    else:
+                                        details = f'Pre-approved: Rs.{pre_limit:,.0f}, Amount: Rs.{loan_amt:,.0f}'
+                                    
+                                    decision = {
+                                        'type': 'agent_decision',
+                                        'agent': 'Sales Agent',
+                                        'decision_type': 'LOAN_OPTIONS',
+                                        'details': details,
+                                        'summary': 'Loan options presented'
+                                    }
+                                    yield f"data: {json.dumps(decision)}\n\n"
+                            
                             # EMI Calculation completed (Sales Agent)
-                            if tool_name == 'calculate_emi':
+                            elif tool_name == 'calculate_emi':
                                 loan_amt = result_data.get('loan_amount', 0)
                                 tenure = result_data.get('tenure_months', 0)
                                 emi = result_data.get('monthly_emi', 0)

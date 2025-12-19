@@ -8,6 +8,7 @@ interface ChatAreaProps {
   messages: Message[];
   isLoading: boolean;
   currentToolCall?: string | null;
+  latestAgentStatus?: string | null;
   onSuggestionClick?: (suggestion: string) => void;
 }
 
@@ -15,6 +16,7 @@ export function ChatArea({
   messages, 
   isLoading, 
   currentToolCall,
+  latestAgentStatus,
   onSuggestionClick
 }: ChatAreaProps) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -41,12 +43,16 @@ export function ChatArea({
           <MessageListSkeleton />
         ) : (
           <>
-            {messages.map((message) => (
-              <MessageBubble key={message.id} message={message} />
+              {messages.map((message) => (
+                <MessageBubble
+                  key={message.id}
+                  message={message}
+                  agentStatus={message.isStreaming ? latestAgentStatus : undefined}
+                />
             ))}
             
             {isLoading && !messages[messages.length - 1]?.isStreaming && (
-              <TypingIndicator toolName={currentToolCall} />
+                <TypingIndicator toolName={currentToolCall} statusText={latestAgentStatus} />
             )}
           </>
         )}

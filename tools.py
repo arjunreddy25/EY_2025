@@ -225,34 +225,122 @@ def fetch_preapproved_offer(customer_id: str) -> str:
 
 
 @tool
-def calculate_emi(
-    loan_amount: float,
-    annual_interest_rate: float,
-    tenure_months: int
+def explore_loan_options(
+    customer_id: str,
+    loan_amount: float = None,
+    tenure_months: int = None
 ) -> str:
     """
-    Calculate EMI based on standard reducing balance formula.
+    Explore personal loan options for a customer. Shows pre-approved amount, 
+    multiple tenure options with dynamic interest rates.
+    
+    - If loan_amount not specified, uses customer's pre_approved_limit
+    - If tenure_months not specified, shows options for 12, 24, 36, 48, 60, 72 months
+    - Interest rate varies by tenure: shorter tenure = lower rate
+    
+    Use this when customer asks about loan offers, EMI, or pre-approved options.
+    """
+    customer = load_customer_data().get(customer_id)
+    if not customer:
+        return json.dumps({"status": "error", "message": f"Customer {customer_id} not found"})
+    
+    credit_score = customer.get("credit_score", 700)
+    pre_approved_limit = float(customer.get("pre_approved_limit", 0))
+    
+    # Use pre_approved_limit if no specific amount requested
+    amount = loan_amount if loan_amount else pre_approved_limit
+    
+    # Base rate from credit score
+    if credit_score >= 800:
+        base_rate = 9.5
+    elif credit_score >= 750:
+        base_rate = 10.5
+    elif credit_score >= 700:
+        base_rate = 11.5
+    else:
+        base_rate = 12.5
+    
+    def get_rate_for_tenure(tenure):
+        """Dynamic rate: shorter tenure = slightly lower rate"""
+        # Baseline is 36 months. Adjust by 0.25% per 12 months from baseline
+        adjustment = (tenure - 36) / 12 * 0.25
+        rate = base_rate + adjustment
+        # Clamp between reasonable bounds
+        return round(max(9.0, min(14.0, rate)), 2)
+    
+    def calc_emi(amount, rate, tenure):
+        monthly_rate = rate / (12 * 100)
+        if monthly_rate == 0:
+            emi = amount / tenure
+        else:
+            emi = (amount * monthly_rate * (1 + monthly_rate) ** tenure) / ((1 + monthly_rate) ** tenure - 1)
+        return round(emi, 2)
+    
+    # If specific tenure requested, return just that option
+    if tenure_months:
+        rate = get_rate_for_tenure(tenure_months)
+        emi = calc_emi(amount, rate, tenure_months)
+        total_payable = emi * tenure_months
+        return json.dumps({
+            "status": "success",
+            "customer_name": customer.get("name"),
+            "pre_approved_limit": pre_approved_limit,
+            "loan_amount": amount,
+            "tenure_months": tenure_months,
+            "interest_rate": rate,
+            "monthly_emi": emi,
+            "total_payable": round(total_payable, 2),
+            "total_interest": round(total_payable - amount, 2)
+        })
+    
+    # Return multiple tenure options
+    tenures = [12, 24, 36, 48, 60, 72]
+    options = []
+    for t in tenures:
+        rate = get_rate_for_tenure(t)
+        emi = calc_emi(amount, rate, t)
+        total = emi * t
+        options.append({
+            "tenure_months": t,
+            "interest_rate": rate,
+            "monthly_emi": emi,
+            "total_payable": round(total, 2),
+            "total_interest": round(total - amount, 2)
+        })
+    
+    return json.dumps({
+        "status": "success",
+        "customer_name": customer.get("name"),
+        "pre_approved_limit": pre_approved_limit,
+        "loan_amount": amount,
+        "credit_score": credit_score,
+        "options": options
+    })
+
+
+@tool
+def calculate_emi(
+    loan_amount: float,
+    annual_interest_rate: float = 10.5,
+    tenure_months: int = 36
+) -> str:
+    """
+    Calculate EMI for a specific loan amount, rate, and tenure.
+    Use explore_loan_options instead for showing multiple options to customer.
     """
     monthly_rate = annual_interest_rate / (12 * 100)
-
     if monthly_rate == 0:
         emi = loan_amount / tenure_months
     else:
-        emi = (
-            loan_amount
-            * monthly_rate
-            * (1 + monthly_rate) ** tenure_months
-        ) / ((1 + monthly_rate) ** tenure_months - 1)
-
+        emi = (loan_amount * monthly_rate * (1 + monthly_rate) ** tenure_months) / ((1 + monthly_rate) ** tenure_months - 1)
+    
     total_payable = emi * tenure_months
-    total_interest = total_payable - loan_amount
-
     return json.dumps({
         "loan_amount": round(loan_amount, 2),
         "interest_rate": annual_interest_rate,
         "tenure_months": tenure_months,
         "monthly_emi": round(emi, 2),
-        "total_interest": round(total_interest, 2),
+        "total_interest": round(total_payable - loan_amount, 2),
         "total_payable": round(total_payable, 2)
     })
 
