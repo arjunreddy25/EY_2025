@@ -91,22 +91,21 @@ sanction_agent = Agent(
     db=db
 )
 
-# Default session state template (will be populated with customer data at runtime)
-# NOTE: This defines the SCHEMA for what agents can update via enable_agentic_state
-# All top-level keys that agents might need to update must be defined here
+# Default session state template - workflow tracking only
+# NOTE: Customer data is NOT stored here. Agents use tools to fetch it.
 DEFAULT_SESSION_STATE = {
-    "customer": None,  # Populated from DB when customer_id is provided
-    "step": "sales",   # Current step: sales | verification | underwriting | sanction
-    # Fields agents may update during workflow
-    "monthly_salary": None,
-    "employer": None,
-    "salary_slip_verified": False,
+    # Customer identification (NOT full profile)
+    "customer_id": None,
+    "customer_name": None,  # Just for greeting
+    "selected_amount": None,
+    "selected_tenure": None,
+    "selected_rate": None,
+    "selected_emi": None,
+    
+    # Status flags
     "kyc_verified": False,
     "loan_approved": False,
-    "loan_amount": None,
-    "interest_rate": None,
-    "tenure_months": None,
-    "emi": None,
+    "salary_verified": False,
 }
 
 loan_sales_team = Team(
@@ -118,21 +117,14 @@ loan_sales_team = Team(
         underwriting_agent,
         sanction_agent
     ],
-    instructions=[
-        "You are the Master Agent - the main orchestrator for a personal loan sales process.",
-        "You manage the conversation flow with the customer, engage them in a personalized manner, and coordinate the loan process.",
-        "Customer data is in session_state.customer.",
-        "",
-        "Your team: Sales Agent (loan terms), Verification Agent (KYC), Underwriting Agent (eligibility), Sanction Agent (PDF letter).",
-        "Hand over tasks to the appropriate agent and coordinate until the loan is sanctioned or rejected.",
-    ],
+    instructions="You are a loan sales assistant. Coordinate with your team members to help customers get personal loans. Delegate tasks based on what the customer needs.",
     db=db,
     session_state=DEFAULT_SESSION_STATE,
     add_session_state_to_context=True,  # Agents see customer profile automatically
-    enable_agentic_state=True,          # Agents can UPDATE session_state (persisted to DB)
+    # enable_agentic_state=True,        # DISABLED: Causes schema validation errors with update_session_state tool
     add_history_to_context=True,
     show_members_responses=True,
-    # markdown=True,
+    markdown=True,
     share_member_interactions=True,
     # Agno Guardrails: Protect against prompt injection and PII leakage
     pre_hooks=[PromptInjectionGuardrail(), PIIDetectionGuardrail()]

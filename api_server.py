@@ -230,49 +230,32 @@ def send_via_google_script(to_email: str, customer_name: str, ref_link: str, pre
 
 def build_session_state(customer_id: Optional[str]) -> dict:
     """
-    Build session state with customer profile from DB.
+    Build session state for workflow tracking ONLY.
     
-    NOTE: We only pass 'customer' data here, NOT 'step'.
-    Why? Agno MERGES by overwriting matching keys. If we pass step:"sales" every time,
-    it would overwrite agent-updated step values (e.g., "verification").
-    
-    The 'step' field is managed by agents via enable_agentic_state=True.
+    NOTE: Customer data is NOT stored in session_state.
+    Agents use tools with customer_id to fetch customer data from DB.
+    Session state only tracks: customer_id, workflow progress, and selected loan parameters.
     """
     session_state = {
-        "customer": None,
-        # DO NOT include "step" here - agents manage it via agentic_state
+        # Customer identification (NOT full profile)
+        "customer_id": customer_id,
+        "customer_name": None,  # Just for greeting       
+        # Selected loan parameters (set during Sales)
+        "selected_amount": None,
+        "selected_tenure": None,
+        "selected_rate": None,
+        "selected_emi": None,
+        
+        # Status flags
+        "kyc_verified": False,
+        "loan_approved": False,
+        "salary_verified": False,
     }
     
     if customer_id:
         customer = get_customer(customer_id)
         if customer:
-            # Include essential fields plus verification/loan status
-            session_state["customer"] = {
-                "customer_id": customer.get("customer_id"),
-                "name": customer.get("name"),
-                "employer": customer.get("employer"),
-                "designation": customer.get("designation"),
-                "years_employed": customer.get("years_employed"),
-                "monthly_salary": customer.get("monthly_salary"),
-                "credit_score": customer.get("credit_score"),
-                "pre_approved_limit": customer.get("pre_approved_limit"),
-                "total_existing_emi": customer.get("total_existing_emi"),
-                "kyc_verified": customer.get("kyc_verified"),
-                # New: Salary slip verification status
-                "salary_slip_verified": customer.get("salary_slip_verified", False),
-                "salary_slip_url": customer.get("salary_slip_url"),
-            }
-            
-            # Get latest loan status to include in session state
-            latest_loan = get_latest_loan_status(customer_id)
-            if latest_loan:
-                session_state["customer"]["has_active_loan"] = True
-                session_state["customer"]["last_loan_status"] = latest_loan.get("status")
-                session_state["customer"]["last_sanction_letter_url"] = latest_loan.get("sanction_letter_url")
-            else:
-                session_state["customer"]["has_active_loan"] = False
-                session_state["customer"]["last_loan_status"] = None
-                session_state["customer"]["last_sanction_letter_url"] = None
+            session_state["customer_name"] = customer.get("name")
     
     return session_state
 
