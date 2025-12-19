@@ -109,15 +109,13 @@ export function AgentActivityDialog({ isOpen, onClose, decisions }: AgentActivit
                                 <div key={agent} className="flex items-center flex-1">
                                     <div className="flex flex-col items-center flex-1">
                                         <div className={cn(
-                                            "size-8 rounded-full flex items-center justify-center text-xs font-semibold transition-all",
+                                            "size-3 rounded-full transition-all",
                                             isActive
                                                 ? hasError
-                                                    ? "bg-red-500 text-white"
-                                                    : `${getAgentColor(agent)} text-white`
-                                                : "bg-muted text-muted-foreground"
-                                        )}>
-                                            {index + 1}
-                                        </div>
+                                                    ? "bg-red-500"
+                                                    : getAgentColor(agent)
+                                                : "bg-muted-foreground/30"
+                                        )} />
                                         <span className={cn(
                                             "text-xs mt-1.5 text-center",
                                             isActive ? "text-foreground font-medium" : "text-muted-foreground"

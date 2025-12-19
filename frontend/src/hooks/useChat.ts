@@ -1,6 +1,6 @@
 /**
- * useChat hook - Refactored to use React Query for data fetching.
- * Keeps WebSocket logic for real-time streaming.
+ * useChat hook - Refactored to use SSE (Server-Sent Events) for streaming.
+ * Simpler and more reliable than WebSocket for unidirectional streaming.
  */
 
 import { useState, useEffect, useCallback, useRef } from 'react';
@@ -14,6 +14,8 @@ import {
   useGenerateTitle,
   chatKeys,
 } from './useChatQueries';
+
+const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 
 export interface Message {
   id: string;
@@ -53,21 +55,15 @@ export interface ChatSession {
 }
 
 interface UseChatOptions {
-  wsUrl?: string;
   initialSessionId?: string;
   onNavigate?: (path: string) => void;
 }
 
 export function useChat(options: UseChatOptions = {}) {
-  const {
-    wsUrl = import.meta.env.VITE_WS_URL || 'ws://localhost:8000/ws/chat',
-    initialSessionId,
-    onNavigate,
-  } = options;
+  const { initialSessionId, onNavigate } = options;
 
-  // Local state for real-time messaging
+  // Local state
   const [messages, setMessages] = useState<Message[]>([]);
-  const [isConnected, setIsConnected] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [currentToolCall, setCurrentToolCall] = useState<string | null>(null);
   const [currentSessionId, setCurrentSessionId] = useState(
@@ -76,10 +72,10 @@ export function useChat(options: UseChatOptions = {}) {
   const [agentDecisions, setAgentDecisions] = useState<AgentDecision[]>([]);
 
   // Refs
-  const wsRef = useRef<WebSocket | null>(null);
   const currentMessageRef = useRef<string>('');
-  const pendingAssistantMessageRef = useRef<string>('');
   const currentSessionIdRef = useRef(currentSessionId);
+  const autoGreetSentRef = useRef(false);
+  const abortControllerRef = useRef<AbortController | null>(null);
 
   // Keep ref in sync
   useEffect(() => {
@@ -90,7 +86,7 @@ export function useChat(options: UseChatOptions = {}) {
   const queryClient = useQueryClient();
   const { data: sessions = [], isLoading: isLoadingSessions } = useSessions();
 
-  // Only fetch session if it exists in sessions list (prevents 404 for new sessions)
+  // Only fetch session if it exists in sessions list
   const sessionExists = sessions.some((s) => s.id === currentSessionId);
   const { data: sessionData } = useSession(sessionExists ? currentSessionId : null);
 
@@ -99,7 +95,7 @@ export function useChat(options: UseChatOptions = {}) {
   const saveMessageMutation = useSaveMessage();
   const generateTitleMutation = useGenerateTitle();
 
-  // Check if we need to refetch sessions (e.g., after email redirect created a session)
+  // Check if we need to refetch sessions (e.g., after email redirect)
   useEffect(() => {
     const needsRefetch = localStorage.getItem('newSessionToRefetch');
     if (needsRefetch) {
@@ -121,17 +117,14 @@ export function useChat(options: UseChatOptions = {}) {
     return null;
   }, []);
 
-  // Track if auto-greeting has been sent for this session
-  const autoGreetSentRef = useRef(false);
-
-  // Load session messages when sessionData changes (only if we have messages and current is empty)
+  // Load session messages when sessionData changes
   useEffect(() => {
     if (sessionData?.messages && sessionData.messages.length > 0 && messages.length === 0) {
       setMessages(sessionData.messages);
     }
   }, [sessionData, messages.length]);
 
-  // Save message helper using ref to avoid stale closures
+  // Save message helper
   const saveMessage = useCallback(
     (role: 'user' | 'assistant', content: string, toolCalls?: ToolCall[]) => {
       saveMessageMutation.mutate({
@@ -149,223 +142,29 @@ export function useChat(options: UseChatOptions = {}) {
     [saveMessageMutation]
   );
 
-  // Connect to WebSocket
-  const connect = useCallback(() => {
-    // Don't create new connection if already connected or connecting
-    if (wsRef.current?.readyState === WebSocket.OPEN) return;
-    if (wsRef.current?.readyState === WebSocket.CONNECTING) return;
-
-    // Close any existing connection that's in closing state
-    if (wsRef.current) {
-      wsRef.current.close();
-      wsRef.current = null;
-    }
-
-    const ws = new WebSocket(`${wsUrl}?session_id=${currentSessionIdRef.current}`);
-
-    ws.onopen = () => setIsConnected(true);
-    ws.onclose = () => setIsConnected(false);
-    ws.onerror = () => setIsConnected(false);
-
-    ws.onmessage = (event) => {
-      const data = JSON.parse(event.data);
-      console.log('[WS] Received message:', data.type, data);
-
-      switch (data.type) {
-        case 'ack':
-          console.log('[WS] Got acknowledgment');
-          break;
-
-        case 'content_start':
-          currentMessageRef.current = '';
-          pendingAssistantMessageRef.current = '';
-          setMessages((prev) => [
-            ...prev,
-            {
-              id: `msg_${Date.now()}`,
-              role: 'assistant',
-              content: '',
-              timestamp: new Date(),
-              isStreaming: true,
-              toolCalls: [],
-            },
-          ]);
-          break;
-
-        case 'content':
-          currentMessageRef.current += data.data;
-          pendingAssistantMessageRef.current = currentMessageRef.current;
-          setMessages((prev) => {
-            const updated = [...prev];
-            const lastMsg = updated[updated.length - 1];
-            if (lastMsg?.role === 'assistant') {
-              lastMsg.content = currentMessageRef.current;
-            }
-            return updated;
-          });
-          break;
-
-        case 'tool_start':
-        case 'member_tool_start':
-          setCurrentToolCall(data.tool);
-          setMessages((prev) => {
-            const updated = [...prev];
-            const lastMsg = updated[updated.length - 1];
-            if (lastMsg?.role === 'assistant') {
-              lastMsg.toolCalls = [
-                ...(lastMsg.toolCalls || []),
-                { tool: data.tool, agent: data.agent, status: 'started' },
-              ];
-            }
-            return updated;
-          });
-          break;
-
-        case 'tool_complete':
-        case 'member_tool_complete':
-          setCurrentToolCall(null);
-          setMessages((prev) => {
-            const updated = [...prev];
-            const lastMsg = updated[updated.length - 1];
-            if (lastMsg?.role === 'assistant' && lastMsg.toolCalls) {
-              const toolCall = lastMsg.toolCalls.find(
-                (tc) => tc.tool === data.tool && tc.status === 'started'
-              );
-              if (toolCall) {
-                toolCall.status = 'completed';
-                toolCall.result = data.result;
-              }
-            }
-            return updated;
-          });
-          break;
-
-        case 'done':
-          setIsLoading(false);
-          setMessages((prev) => {
-            const updated = [...prev];
-            const lastMsg = updated[updated.length - 1];
-            if (lastMsg?.role === 'assistant') {
-              lastMsg.isStreaming = false;
-              // Save assistant message
-              if (pendingAssistantMessageRef.current) {
-                saveMessage('assistant', pendingAssistantMessageRef.current, lastMsg.toolCalls);
-                pendingAssistantMessageRef.current = '';
-              }
-            }
-            return updated;
-          });
-          break;
-
-        case 'error':
-          setIsLoading(false);
-          setMessages((prev) => [
-            ...prev,
-            {
-              id: `msg_${Date.now()}`,
-              role: 'assistant',
-              content: `Error: ${data.message}`,
-              timestamp: new Date(),
-            },
-          ]);
-          break;
-
-        case 'sanction_letter':
-          // Backend has generated a sanction letter PDF - attach URL to current message
-          setMessages((prev) => {
-            const updated = [...prev];
-            const lastMsg = updated[updated.length - 1];
-            if (lastMsg?.role === 'assistant') {
-              lastMsg.pdfUrl = data.pdf_url;
-              lastMsg.letterId = data.letter_id;
-            }
-            return updated;
-          });
-          break;
-
-        case 'agent_decision':
-          // Capture agent workflow decisions for the activity timeline
-          setAgentDecisions((prev) => [
-            ...prev,
-            {
-              id: `decision_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-              agent: data.agent,
-              decisionType: data.decision_type,
-              details: data.details,
-              summary: data.summary,
-              timestamp: new Date(),
-            },
-          ]);
-          break;
-      }
-    };
-
-    wsRef.current = ws;
-  }, [wsUrl, saveMessage]);
-
-  // Disconnect from WebSocket
-  const disconnect = useCallback(() => {
-    if (wsRef.current) {
-      wsRef.current.close();
-      wsRef.current = null;
-    }
-  }, []);
-
-  // Send a message
+  // Send message using SSE for streaming response
   const sendMessage = useCallback(
     async (content: string, file?: File) => {
-      // Wait for WebSocket to be ready
-      if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
-        connect();
-
-        // Wait for connection with a promise instead of recursive setTimeout
-        const waitForConnection = new Promise<boolean>((resolve) => {
-          const checkInterval = setInterval(() => {
-            if (wsRef.current?.readyState === WebSocket.OPEN) {
-              clearInterval(checkInterval);
-              resolve(true);
-            }
-          }, 100);
-
-          // Timeout after 3 seconds
-          setTimeout(() => {
-            clearInterval(checkInterval);
-            resolve(false);
-          }, 3000);
-        });
-
-        const connected = await waitForConnection;
-        if (!connected) {
-          console.error('Failed to establish WebSocket connection');
-          setMessages((prev) => [
-            ...prev,
-            {
-              id: `msg_${Date.now()}`,
-              role: 'assistant',
-              content: 'Connection error. Please try again.',
-              timestamp: new Date(),
-            },
-          ]);
-          return;
-        }
+      // Abort any existing stream
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
       }
 
       let messageContent = content;
 
-      // Upload file if provided - backend processes with VLM immediately
+      // Handle file upload
       if (file) {
         try {
           const formData = new FormData();
           formData.append('file', file);
 
-          const uploadResponse = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:8000'}/upload/salary-slip`, {
+          const uploadResponse = await fetch(`${API_BASE}/upload/salary-slip`, {
             method: 'POST',
             body: formData,
           });
 
           if (uploadResponse.ok) {
             const uploadData = await uploadResponse.json();
-            // Backend already processed with VLM - send extracted data to agent
             const extracted = uploadData.extracted;
             if (extracted?.status === 'success') {
               messageContent = `${content}\n\n[SALARY SLIP VERIFIED: Net Salary = ₹${extracted.net_salary?.toLocaleString() || 'Unknown'}, Employer = ${extracted.employer || 'Unknown'}, Period = ${extracted.pay_period || 'Unknown'}]`;
@@ -383,47 +182,22 @@ export function useChat(options: UseChatOptions = {}) {
 
       const isFirstMessage = messages.length === 0;
 
-      // Auto-create session if this is the first message
+      // Create session if first message
       if (isFirstMessage) {
-        // Generate a fresh session ID for new chats from welcome page
-        const newSessionId = `session_${Date.now()}`;
-        setCurrentSessionId(newSessionId);
-        currentSessionIdRef.current = newSessionId;
+        try {
+          await createSessionMutation.mutateAsync({
+            sessionId: currentSessionIdRef.current,
+            title: 'New Chat',
+          });
 
-        await createSessionMutation.mutateAsync({
-          sessionId: newSessionId,
-          title: 'New Chat',
-        });
-
-        // Update URL without causing navigation/remount - this prevents WS disconnect
-        window.history.replaceState(null, '', `/chat/${newSessionId}`);
-
-        // Reconnect WebSocket with new session ID
-        disconnect();
-        connect();
-
-        // Wait for connection to be ready
-        const waitForReconnect = new Promise<boolean>((resolve) => {
-          const checkInterval = setInterval(() => {
-            if (wsRef.current?.readyState === WebSocket.OPEN) {
-              clearInterval(checkInterval);
-              resolve(true);
-            }
-          }, 100);
-          setTimeout(() => {
-            clearInterval(checkInterval);
-            resolve(false);
-          }, 3000);
-        });
-
-        const reconnected = await waitForReconnect;
-        if (!reconnected) {
-          console.error('Failed to reconnect WebSocket with new session');
-          return;
+          // Update URL without navigation
+          window.history.replaceState(null, '', `/chat/${currentSessionIdRef.current}`);
+        } catch (e) {
+          console.error('Failed to create session:', e);
         }
       }
 
-      // Add user message to UI (show clean version without system context)
+      // Add user message to UI
       const displayContent = file ? `${content}\n\n📎 Attached: ${file.name}` : content;
       const userMessage: Message = {
         id: `msg_${Date.now()}`,
@@ -435,12 +209,11 @@ export function useChat(options: UseChatOptions = {}) {
       setMessages((prev) => [...prev, userMessage]);
       setIsLoading(true);
 
-      // Save user message (full content with system context)
+      // Save user message
       saveMessage('user', messageContent);
 
-      // Generate AI title based on first USER message (not AI greeting)
-      // Count user messages to handle email redirect scenario where AI greeting comes first
-      const userMessageCount = messages.filter(m => m.role === 'user').length;
+      // Generate AI title on first user message
+      const userMessageCount = messages.filter((m) => m.role === 'user').length;
       if (userMessageCount === 0) {
         generateTitleMutation.mutate({
           sessionId: currentSessionIdRef.current,
@@ -448,69 +221,258 @@ export function useChat(options: UseChatOptions = {}) {
         });
       }
 
-      // Get customer info and send to WebSocket (send full message with file path)
+      // Get customer info
       const customer = getCustomerInfo();
-      if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
-        console.error('WebSocket not ready when trying to send message');
-        return;
+
+      // Build SSE URL
+      const params = new URLSearchParams({
+        message: messageContent,
+        session_id: currentSessionIdRef.current,
+      });
+      if (customer?.customer_id) {
+        params.set('customer_id', customer.customer_id);
+        params.set('customer_name', customer.name || '');
       }
-      wsRef.current.send(
-        JSON.stringify({
-          message: messageContent,
-          customer_id: customer?.customer_id || null,
-          customer_name: customer?.name || null,
-        })
-      );
+
+      // Create abort controller for this request
+      const abortController = new AbortController();
+      abortControllerRef.current = abortController;
+
+      // Add streaming assistant message
+      const assistantMessageId = `msg_${Date.now()}_assistant`;
+      currentMessageRef.current = '';
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: assistantMessageId,
+          role: 'assistant',
+          content: '',
+          timestamp: new Date(),
+          isStreaming: true,
+          toolCalls: [],
+        },
+      ]);
+
+      try {
+        const response = await fetch(`${API_BASE}/chat/stream?${params.toString()}`, {
+          signal: abortController.signal,
+        });
+
+        if (!response.ok) {
+          throw new Error(`HTTP error: ${response.status}`);
+        }
+
+        const reader = response.body?.getReader();
+        const decoder = new TextDecoder();
+
+        if (!reader) {
+          throw new Error('No response body');
+        }
+
+        let pendingContent = '';
+
+        while (true) {
+          const { done, value } = await reader.read();
+
+          if (done) break;
+
+          const chunk = decoder.decode(value, { stream: true });
+          const lines = chunk.split('\n');
+
+          for (const line of lines) {
+            if (line.startsWith('data: ')) {
+              try {
+                const data = JSON.parse(line.slice(6));
+
+                switch (data.type) {
+                  case 'content':
+                    currentMessageRef.current += data.data;
+                    pendingContent = currentMessageRef.current;
+                    setMessages((prev) => {
+                      const updated = [...prev];
+                      const lastMsg = updated[updated.length - 1];
+                      if (lastMsg?.role === 'assistant') {
+                        lastMsg.content = currentMessageRef.current;
+                      }
+                      return updated;
+                    });
+                    break;
+
+                  case 'tool_start':
+                  case 'member_tool_start':
+                    setCurrentToolCall(data.tool);
+                    setMessages((prev) => {
+                      const updated = [...prev];
+                      const lastMsg = updated[updated.length - 1];
+                      if (lastMsg?.role === 'assistant') {
+                        lastMsg.toolCalls = [
+                          ...(lastMsg.toolCalls || []),
+                          { tool: data.tool, agent: data.agent, status: 'started' },
+                        ];
+                      }
+                      return updated;
+                    });
+                    break;
+
+                  case 'tool_complete':
+                  case 'member_tool_complete':
+                    setCurrentToolCall(null);
+                    setMessages((prev) => {
+                      const updated = [...prev];
+                      const lastMsg = updated[updated.length - 1];
+                      if (lastMsg?.role === 'assistant' && lastMsg.toolCalls) {
+                        const toolCall = lastMsg.toolCalls.find(
+                          (tc) => tc.tool === data.tool && tc.status === 'started'
+                        );
+                        if (toolCall) {
+                          toolCall.status = 'completed';
+                          toolCall.result = data.result;
+                        }
+                      }
+                      return updated;
+                    });
+                    break;
+
+                  case 'agent_decision':
+                    setAgentDecisions((prev) => [
+                      ...prev,
+                      {
+                        id: `decision_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+                        agent: data.agent,
+                        decisionType: data.decision_type,
+                        details: data.details,
+                        summary: data.summary,
+                        timestamp: new Date(),
+                      },
+                    ]);
+                    break;
+
+                  case 'sanction_letter':
+                    setMessages((prev) => {
+                      const updated = [...prev];
+                      const lastMsg = updated[updated.length - 1];
+                      if (lastMsg?.role === 'assistant') {
+                        lastMsg.pdfUrl = data.pdf_url;
+                        lastMsg.letterId = data.letter_id;
+                      }
+                      return updated;
+                    });
+                    break;
+
+                  case 'done':
+                    setIsLoading(false);
+                    setMessages((prev) => {
+                      const updated = [...prev];
+                      const lastMsg = updated[updated.length - 1];
+                      if (lastMsg?.role === 'assistant') {
+                        lastMsg.isStreaming = false;
+                      }
+                      return updated;
+                    });
+                    // Save assistant message
+                    if (pendingContent) {
+                      saveMessage('assistant', pendingContent);
+                    }
+                    break;
+
+                  case 'error':
+                    setIsLoading(false);
+                    setMessages((prev) => {
+                      const updated = [...prev];
+                      const lastMsg = updated[updated.length - 1];
+                      if (lastMsg?.role === 'assistant') {
+                        lastMsg.content = `Error: ${data.message}`;
+                        lastMsg.isStreaming = false;
+                      }
+                      return updated;
+                    });
+                    break;
+                }
+              } catch {
+                // Ignore parse errors for incomplete chunks
+              }
+            }
+          }
+        }
+      } catch (error) {
+        if ((error as Error).name === 'AbortError') {
+          console.log('SSE stream aborted');
+          return;
+        }
+        console.error('SSE error:', error);
+        setIsLoading(false);
+        setMessages((prev) => {
+          const updated = [...prev];
+          const lastMsg = updated[updated.length - 1];
+          if (lastMsg?.role === 'assistant') {
+            lastMsg.content = 'Connection error. Please try again.';
+            lastMsg.isStreaming = false;
+          }
+          return updated;
+        });
+      }
     },
     [
-      connect,
-      disconnect,
-      currentSessionId,
       messages.length,
+      messages,
       createSessionMutation,
       saveMessage,
       generateTitleMutation,
       getCustomerInfo,
-      onNavigate,
     ]
   );
 
-  // Create new session - just navigate to welcome, everything else happens on first message
+  // Create new session - simple reset
   const newSession = useCallback(() => {
+    // Abort any ongoing stream
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
+
+    // Generate fresh session ID
+    const freshId = `session_${Date.now()}`;
+    setCurrentSessionId(freshId);
+    currentSessionIdRef.current = freshId;
+
+    // Reset all state
     setMessages([]);
+    setAgentDecisions([]);
+    setIsLoading(false);
+    setCurrentToolCall(null);
     autoGreetSentRef.current = false;
-    // Just navigate to welcome - session ID will be created fresh when message is sent
-    onNavigate?.(`/`);
+
+    // Navigate to welcome screen
+    onNavigate?.('/');
   }, [onNavigate]);
 
   // Load a session
   const loadSession = useCallback(
     (session: ChatSession) => {
-      disconnect();
+      // Abort any ongoing stream
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+      }
+
       setCurrentSessionId(session.id);
       setMessages([]); // Clear messages so they load from query
+      setAgentDecisions([]);
       onNavigate?.(`/chat/${session.id}`);
     },
-    [disconnect, onNavigate]
+    [onNavigate]
   );
 
-  // Delete a session with redirect
+  // Delete a session
   const deleteSession = useCallback(
     (sessionId: string) => {
       deleteSessionMutation.mutate(sessionId, {
         onSuccess: () => {
-          // If deleting current session, navigate to welcome screen
           if (sessionId === currentSessionId) {
-            const newId = `session_${Date.now()}`;
-            setCurrentSessionId(newId);
-            setMessages([]);
-            disconnect();
-            onNavigate?.(`/`);
+            newSession();
           }
         },
       });
     },
-    [currentSessionId, deleteSessionMutation, disconnect, onNavigate]
+    [currentSessionId, deleteSessionMutation, newSession]
   );
 
   // Refetch sessions
@@ -525,65 +487,47 @@ export function useChat(options: UseChatOptions = {}) {
     }
   }, [initialSessionId]);
 
-  // Auto-connect on mount and session change
-  useEffect(() => {
-    const timeoutId = setTimeout(() => {
-      connect();
-    }, 100);
-    return () => {
-      clearTimeout(timeoutId);
-      disconnect();
-    };
-  }, [currentSessionId]); // Only depend on sessionId, not on connect/disconnect
-
-  // Auto-greet user ONLY when they land from email link
-  // Checks for 'fromEmailRedirect' flag set in App.tsx RefVerifier
+  // Auto-greet user when they land from email link
   useEffect(() => {
     const customer = getCustomerInfo();
     const isFromEmail = localStorage.getItem('fromEmailRedirect') === 'true';
 
-    // Only send greeting for FRESH email redirects
     if (
       customer?.customer_id &&
-      isFromEmail &&  // KEY: Only when just arrived from email
+      isFromEmail &&
       !autoGreetSentRef.current &&
       messages.length === 0 &&
-      isConnected &&
       !isLoading
     ) {
       autoGreetSentRef.current = true;
-      // Clear the flag immediately so it doesn't fire again
       localStorage.removeItem('fromEmailRedirect');
-      // Small delay to ensure connection is ready
-      const greetTimeout = setTimeout(async () => {
-        // Create session in database for email redirect users
+
+      // Inject greeting immediately
+      const greetingMessage: Message = {
+        id: `msg_greeting_${Date.now()}`,
+        role: 'assistant',
+        content: `Hello ${customer.name || 'there'}! 👋\n\nWelcome to NBFC Personal Loans. I'm your digital loan assistant.\n\nGreat news — you've been **pre-approved** for a personal loan! I'm here to help you:\n\n• Calculate your EMI for any amount\n• Complete quick KYC verification\n• Get your loan sanctioned in minutes\n\nHow much loan amount are you looking for, and over what tenure?`,
+        timestamp: new Date(),
+        isStreaming: false,
+        toolCalls: [],
+      };
+      setMessages([greetingMessage]);
+
+      // Create session and save greeting after small delay
+      setTimeout(async () => {
         try {
           await createSessionMutation.mutateAsync({
-            sessionId: currentSessionId,
+            sessionId: currentSessionIdRef.current,
             title: `Chat with ${customer.name || 'Customer'}`,
           });
-          onNavigate?.(`/chat/${currentSessionId}`);
+          onNavigate?.(`/chat/${currentSessionIdRef.current}`);
+          saveMessage('assistant', greetingMessage.content);
         } catch (e) {
           console.error('Failed to create session for greeting:', e);
         }
-
-        // Inject a proper AI greeting message directly
-        const greetingMessage: Message = {
-          id: `msg_greeting_${Date.now()}`,
-          role: 'assistant',
-          content: `Hello ${customer.name || 'there'}! 👋\n\nWelcome to NBFC Personal Loans. I'm your digital loan assistant.\n\nGreat news — you've been **pre-approved** for a personal loan! I'm here to help you:\n\n• Calculate your EMI for any amount\n• Complete quick KYC verification\n• Get your loan sanctioned in minutes\n\nHow much loan amount are you looking for, and over what tenure?`,
-          timestamp: new Date(),
-          isStreaming: false,
-          toolCalls: [],
-        };
-        setMessages([greetingMessage]);
-
-        // Save the greeting message to database
-        saveMessage('assistant', greetingMessage.content);
       }, 300);
-      return () => clearTimeout(greetTimeout);
     }
-  }, [isConnected, messages.length, isLoading, getCustomerInfo, saveMessage, currentSessionId, createSessionMutation, onNavigate]);
+  }, [messages.length, isLoading, getCustomerInfo, saveMessage, createSessionMutation, onNavigate]);
 
   // Clear agent decisions (for new sessions)
   const clearAgentDecisions = useCallback(() => {
@@ -592,7 +536,7 @@ export function useChat(options: UseChatOptions = {}) {
 
   return {
     messages,
-    isConnected,
+    isConnected: true, // SSE doesn't need persistent connection
     isLoading,
     isLoadingSessions,
     currentToolCall,
@@ -604,8 +548,8 @@ export function useChat(options: UseChatOptions = {}) {
     loadSession,
     deleteSession,
     fetchSessions: refetchSessions,
-    connect,
-    disconnect,
+    connect: () => { }, // No-op for SSE
+    disconnect: () => { }, // No-op for SSE
     clearAgentDecisions,
   };
 }

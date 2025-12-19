@@ -966,22 +966,31 @@ async def chat_stream_endpoint(
     """
     Server-Sent Events (SSE) endpoint for streaming responses.
     Usage: GET /chat/stream?message=hello&session_id=abc123&customer_id=CUST001&customer_name=John
+    
+    Emits events:
+    - content_start/content: streaming text tokens
+    - tool_start/tool_complete: tool execution
+    - member_tool_start/member_tool_complete: member agent tools
+    - agent_decision: high-level workflow decisions for activity timeline
+    - done/error: completion signals
     """
     
     # Build session state with customer profile
     session_state = build_session_state(customer_id)
     
+    print(f"📨 SSE stream started: '{message[:50]}...' for session: {session_id}")
+    
     async def event_generator():
         try:
             content_started = False
+            agents_seen = set()  # Track which agents have started responding
             
-            # Use arun() directly - no threading needed! Members run concurrently
             async for run_output_event in loan_sales_team.arun(
-                message,  # Plain message
+                message,
                 stream=True,
                 stream_events=True,
                 session_id=session_id,
-                session_state=session_state  # Customer data injected here
+                session_state=session_state
             ):
                 # Stream content tokens
                 if run_output_event.event == TeamRunEvent.run_content:
@@ -991,7 +1000,7 @@ async def chat_stream_endpoint(
                             content_started = True
                         yield f"data: {json.dumps({'type': 'content', 'data': run_output_event.content})}\n\n"
                 
-                # Stream tool call events
+                # Team-level tool call events
                 elif run_output_event.event == TeamRunEvent.tool_call_started:
                     tool_name = getattr(run_output_event.tool, 'tool_name', 'unknown')
                     yield f"data: {json.dumps({'type': 'tool_start', 'tool': tool_name})}\n\n"
@@ -1001,20 +1010,129 @@ async def chat_stream_endpoint(
                     result = getattr(run_output_event.tool, 'result', '')
                     yield f"data: {json.dumps({'type': 'tool_complete', 'tool': tool_name, 'result': str(result)[:100]})}\n\n"
                 
-                # Stream member agent tool events
+                # Member agent tool events + Agent Decisions
                 elif run_output_event.event == RunEvent.tool_call_started:
                     agent_id = getattr(run_output_event, 'agent_id', 'unknown')
                     tool_name = getattr(run_output_event.tool, 'tool_name', 'unknown')
                     yield f"data: {json.dumps({'type': 'member_tool_start', 'agent': agent_id, 'tool': tool_name})}\n\n"
+                    
+                    # Emit delegation decision when agent first starts using tools
+                    if agent_id not in agents_seen:
+                        agents_seen.add(agent_id)
+                        yield f"data: {json.dumps({'type': 'agent_decision', 'agent': 'Master Agent', 'decision_type': 'DELEGATION', 'details': f'Delegating to {agent_id}', 'summary': f'Handing off to {agent_id}'})}\n\n"
                 
                 elif run_output_event.event == RunEvent.tool_call_completed:
                     agent_id = getattr(run_output_event, 'agent_id', 'unknown')
                     tool_name = getattr(run_output_event.tool, 'tool_name', 'unknown')
+                    result_str = getattr(run_output_event.tool, 'result', '')
+                    
                     yield f"data: {json.dumps({'type': 'member_tool_complete', 'agent': agent_id, 'tool': tool_name})}\n\n"
+                    
+                    # Parse tool results and emit agent_decision events
+                    if result_str:
+                        try:
+                            result_data = json.loads(result_str)
+                            
+                            # EMI Calculation completed (Sales Agent)
+                            if tool_name == 'calculate_emi':
+                                loan_amt = result_data.get('loan_amount', 0)
+                                tenure = result_data.get('tenure_months', 0)
+                                emi = result_data.get('monthly_emi', 0)
+                                decision = {
+                                    'type': 'agent_decision',
+                                    'agent': 'Sales Agent',
+                                    'decision_type': 'EMI_CALCULATED',
+                                    'details': f'Amount: Rs.{loan_amt:,.0f}, Tenure: {tenure} months, EMI: Rs.{emi:,.0f}',
+                                    'summary': 'EMI calculation complete'
+                                }
+                                yield f"data: {json.dumps(decision)}\n\n"
+                            
+                            # KYC Verification completed
+                            elif tool_name == 'fetch_kyc_from_crm':
+                                status = result_data.get('status', 'error')
+                                if status == 'success' and result_data.get('kyc_verified'):
+                                    name = result_data.get('name', 'Unknown')
+                                    decision = {
+                                        'type': 'agent_decision',
+                                        'agent': 'Verification Agent',
+                                        'decision_type': 'KYC_VERIFIED',
+                                        'details': f'Customer: {name}, Phone & Address verified',
+                                        'summary': 'Identity verification passed'
+                                    }
+                                    yield f"data: {json.dumps(decision)}\n\n"
+                                elif status == 'success' and not result_data.get('kyc_verified'):
+                                    decision = {
+                                        'type': 'agent_decision',
+                                        'agent': 'Verification Agent',
+                                        'decision_type': 'KYC_FAILED',
+                                        'details': 'KYC documents not verified',
+                                        'summary': 'Identity verification failed'
+                                    }
+                                    yield f"data: {json.dumps(decision)}\n\n"
+                            
+                            # Loan Eligibility validated
+                            elif tool_name == 'validate_loan_eligibility':
+                                status = result_data.get('status', '')
+                                if status == 'approved':
+                                    approved_amt = result_data.get('approved_amount', 0)
+                                    rate = result_data.get('interest_rate', 0)
+                                    decision = {
+                                        'type': 'agent_decision',
+                                        'agent': 'Underwriting Agent',
+                                        'decision_type': 'APPROVED',
+                                        'details': f'Amount: Rs.{approved_amt:,.0f} at {rate}% interest',
+                                        'summary': 'Loan approved - proceed to sanction'
+                                    }
+                                    yield f"data: {json.dumps(decision)}\n\n"
+                                elif status == 'conditional_approval':
+                                    requires = result_data.get('requires', 'salary_slip_upload')
+                                    decision = {
+                                        'type': 'agent_decision',
+                                        'agent': 'Underwriting Agent',
+                                        'decision_type': 'CONDITIONAL',
+                                        'details': f'Requires: {requires}',
+                                        'summary': 'Conditional approval - salary slip required'
+                                    }
+                                    yield f"data: {json.dumps(decision)}\n\n"
+                                elif status == 'rejected':
+                                    reason = result_data.get('reason', 'Unknown')
+                                    decision = {
+                                        'type': 'agent_decision',
+                                        'agent': 'Underwriting Agent',
+                                        'decision_type': 'REJECTED',
+                                        'details': f'Reason: {reason}',
+                                        'summary': 'Loan application rejected'
+                                    }
+                                    yield f"data: {json.dumps(decision)}\n\n"
+                            
+                            # Sanction letter generated
+                            elif tool_name == 'generate_sanction_letter':
+                                if result_data.get("status") == "generated":
+                                    letter_id = result_data.get('letter_id', 'Unknown')
+                                    decision = {
+                                        'type': 'agent_decision',
+                                        'agent': 'Sanction Agent',
+                                        'decision_type': 'LETTER_GENERATED',
+                                        'details': f'Letter ID: {letter_id}',
+                                        'summary': 'Sanction letter generated successfully'
+                                    }
+                                    yield f"data: {json.dumps(decision)}\n\n"
+                                    # Also emit sanction_letter event for frontend to show download
+                                    sanction_event = {
+                                        'type': 'sanction_letter',
+                                        'pdf_url': result_data.get('pdf_url'),
+                                        'letter_id': result_data.get('letter_id')
+                                    }
+                                    yield f"data: {json.dumps(sanction_event)}\n\n"
+                                    
+                        except (json.JSONDecodeError, TypeError):
+                            pass  # Not JSON result, skip decision parsing
             
             yield f"data: {json.dumps({'type': 'done'})}\n\n"
             
         except Exception as e:
+            print(f"❌ SSE stream error: {e}")
+            traceback.print_exc()
             yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
     
     return StreamingResponse(
@@ -1026,6 +1144,7 @@ async def chat_stream_endpoint(
             "X-Accel-Buffering": "no"
         }
     )
+
 
 
 @app.websocket("/ws/chat")

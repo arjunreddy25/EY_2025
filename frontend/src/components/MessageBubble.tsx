@@ -1,34 +1,14 @@
 import { cn } from '@/lib/utils';
 import { Skeleton } from '@/components/ui/skeleton';
-import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Copy, Check, Wrench, Download } from 'lucide-react';
+import { Copy, Check, Download } from 'lucide-react';
 import { useState } from 'react';
 import ReactMarkdown from 'react-markdown';
-import type { Message, ToolCall } from '@/hooks/useChat';
+import type { Message } from '@/hooks/useChat';
+import { TypingIndicator } from './TypingIndicator';
 
 interface MessageBubbleProps {
   message: Message;
-}
-
-function ToolCallBadge({ toolCall }: { toolCall: ToolCall }) {
-  const isCompleted = toolCall.status === 'completed';
-  
-  return (
-    <Badge 
-      variant={isCompleted ? "secondary" : "outline"}
-      className={cn(
-        "gap-1.5 text-xs font-normal",
-        !isCompleted && "animate-pulse"
-      )}
-    >
-      <Wrench className="size-3" />
-      <span className="capitalize">{toolCall.tool.replace(/_/g, ' ')}</span>
-      {toolCall.agent && (
-        <span className="text-muted-foreground">({toolCall.agent})</span>
-      )}
-    </Badge>
-  );
 }
 
 
@@ -64,26 +44,12 @@ export function MessageBubble({ message }: MessageBubbleProps) {
               : "bg-muted text-foreground"
           )}
         >
-          {/* Tool calls - only show during streaming, filter out internal delegation tools */}
-          {message.isStreaming && message.toolCalls && message.toolCalls.length > 0 && (() => {
-            // Filter out internal agent delegation tools
-            const visibleTools = message.toolCalls.filter(tc =>
-              !tc.tool.includes('transfer_task') &&
-              !tc.tool.includes('delegate') &&
-              tc.tool !== 'transfer_task_to_member'
-            );
-            return visibleTools.length > 0 ? (
-              <div className="mb-3 flex flex-wrap gap-2">
-                {visibleTools.map((tc, idx) => (
-                  <ToolCallBadge key={idx} toolCall={tc} />
-                ))}
-              </div>
-            ) : null;
-          })()}
 
-          {/* Message content or skeleton */}
+          {/* Message content or typing indicator */}
           {message.isStreaming && !message.content ? (
-            <MessageSkeleton />
+            <TypingIndicator
+              toolName={message.toolCalls?.find(tc => tc.status === 'started')?.tool}
+            />
           ) : isUser ? (
             <div className="whitespace-pre-wrap break-words">
               {message.content}
@@ -158,6 +124,8 @@ export function MessageBubble({ message }: MessageBubbleProps) {
     </div>
   );
 }
+
+
 
 export function MessageSkeleton() {
   return (

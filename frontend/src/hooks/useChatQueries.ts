@@ -70,7 +70,7 @@ export function useSession(sessionId: string | null) {
 }
 
 /**
- * Mutation to create a new session
+ * Mutation to create a new session with optimistic update
  */
 export function useCreateSession() {
     const queryClient = useQueryClient();
@@ -78,10 +78,38 @@ export function useCreateSession() {
     return useMutation({
         mutationFn: ({ sessionId, title }: { sessionId: string; title?: string }) =>
             createSession(sessionId, title),
+        onMutate: async ({ sessionId, title }) => {
+            // Cancel outgoing refetches
+            await queryClient.cancelQueries({ queryKey: chatKeys.sessions() });
+
+            // Snapshot previous value
+            const previousSessions = queryClient.getQueryData(chatKeys.sessions());
+
+            // Optimistically add new session to top of list (before select transform)
+            queryClient.setQueryData(chatKeys.sessions(), (old: ChatSession[] | undefined) => {
+                const newSession = {
+                    session_id: sessionId,
+                    id: sessionId,
+                    title: title || 'New Chat',
+                    created_at: new Date().toISOString(),
+                    updated_at: new Date().toISOString(),
+                    message_count: 0,
+                };
+                return old ? [newSession, ...old] : [newSession];
+            });
+
+            return { previousSessions };
+        },
+        onError: (_, __, context) => {
+            // Rollback on error
+            if (context?.previousSessions) {
+                queryClient.setQueryData(chatKeys.sessions(), context.previousSessions);
+            }
+        },
         onSuccess: (_, { sessionId }) => {
             // Add to localStorage
             addStoredSessionId(sessionId);
-            // Invalidate sessions list to refetch
+            // Refetch to ensure consistency
             queryClient.invalidateQueries({ queryKey: chatKeys.sessions() });
         },
     });

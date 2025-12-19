@@ -325,6 +325,16 @@ def validate_loan_eligibility(
     Underwriting rules engine (mock).
     Applies deterministic loan eligibility rules.
     """
+    # Type coercion for parameters (LLM might pass strings)
+    try:
+        loan_amount = float(loan_amount)
+        tenure_months = int(tenure_months)
+    except (ValueError, TypeError) as e:
+        return json.dumps({
+            "status": "error",
+            "reason": f"Invalid parameters: {str(e)}"
+        })
+    
     customer = load_customer_data().get(customer_id)
 
     if not customer:
@@ -335,11 +345,13 @@ def validate_loan_eligibility(
 
     credit_score = customer["credit_score"]
     salary = customer.get("monthly_salary", customer.get("salary", 0))  # Support both field names
-    pre_limit = customer["pre_approved_limit"]
+    # Convert salary to float in case it's a Decimal from DB
+    salary = float(salary) if salary else 0
+    pre_limit = float(customer["pre_approved_limit"])
     
-    # Get existing loan EMIs for FOIR calculation
+    # Get existing loan EMIs for FOIR calculation - convert to float
     existing_loans = customer.get("existing_loans", [])
-    total_existing_emi = sum(loan.get("emi", 0) for loan in existing_loans)
+    total_existing_emi = float(sum(float(loan.get("emi", 0)) for loan in existing_loans))
 
     # Rule 1: Credit score check
     if credit_score < 700:

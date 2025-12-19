@@ -57,7 +57,7 @@ CUSTOMER_DATA = load_customer_data()
 
 sales_agent = Agent(
     name="Sales Agent",
-    role="Personal Loan Sales Executive",
+    role="Greet customer, discuss loan amount, calculate EMI options, confirm choice",
     model=groq_model,
     instructions=[SALES_AGENT_PROMPT],
     tools=[calculate_emi],
@@ -66,7 +66,7 @@ sales_agent = Agent(
 
 verification_agent = Agent(
     name="Verification Agent",
-    role="KYC Verification Executive",
+    role="Verify customer KYC status from CRM",
     model=groq_model,
     instructions=[VERIFICATION_AGENT_PROMPT],
     tools=[fetch_kyc_from_crm],
@@ -75,7 +75,7 @@ verification_agent = Agent(
 
 underwriting_agent = Agent(
     name="Underwriting Agent",
-    role="Loan Underwriting Officer",
+    role="Check credit score and loan eligibility, approve/reject/request salary slip",
     model=groq_model,
     instructions=[UNDERWRITING_AGENT_PROMPT],
     tools=[fetch_credit_score, fetch_preapproved_offer, validate_loan_eligibility],
@@ -84,7 +84,7 @@ underwriting_agent = Agent(
 
 sanction_agent = Agent(
     name="Sanction Agent",
-    role="Sanction Letter Generator",
+    role="Generate sanction letter PDF for approved loans",
     model=groq_model,
     instructions=[SANCTION_AGENT_PROMPT],
     tools=[generate_sanction_letter],
@@ -119,15 +119,25 @@ loan_sales_team = Team(
         sanction_agent
     ],
     instructions=[
-        "You are a digital loan assistant for an NBFC. Help customers get personal loans.",
-        "Customer data is in session_state.customer (name, salary, credit_score, pre_approved_limit, etc).",
-        "Use customer_id from session_state for all tool calls. NEVER ask for customer ID.",
+        "You are a loan assistant. Customer data is in session_state.customer (name, pre_approved_limit, etc).",
         "",
-        "FLOW (one step at a time):",
-        "1. SALES: Delegate to Sales Agent for loan terms and EMI. Wait for customer confirmation.",
-        "2. VERIFICATION: Delegate to Verification Agent for KYC check.",
-        "3. UNDERWRITING: Delegate to Underwriting Agent. Handle approved/conditional/rejected.",
-        "4. SANCTION: Only after approval, delegate to Sanction Agent for letter.",
+        "WORKFLOW - Follow this exact order:",
+        "",
+        "1. SALES AGENT: Delegate FIRST. Agent will greet, discuss amount, show EMI options.",
+        "   TRIGGER: Any loan inquiry or start of conversation.",
+        "   WAIT: Until customer confirms amount + tenure choice.",
+        "",
+        "2. VERIFICATION AGENT: Delegate after customer confirms loan choice.",
+        "   TRIGGER: Customer says 'yes', 'I'll take it', selects an option, or confirms.",
+        "",
+        "3. UNDERWRITING AGENT: Delegate after KYC is verified.",
+        "   TRIGGER: Verification Agent reports 'KYC verified'.",
+        "   NOTE: If 'conditional_approval', wait for salary slip upload.",
+        "",
+        "4. SANCTION AGENT: Delegate only after loan is approved.",
+        "   TRIGGER: Underwriting Agent reports 'approved'.",
+        "",
+        "RULES: Never skip steps. Wait for user response between major steps.",
     ],
     db=db,
     session_state=DEFAULT_SESSION_STATE,
