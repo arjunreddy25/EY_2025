@@ -6,7 +6,7 @@ import requests
 import base64
 from pathlib import Path
 from datetime import datetime
-from db_neon import get_all_customers, create_loan_application
+from db_neon import get_all_customers, create_loan_application, get_sanctioned_loans_emi
 from io import BytesIO
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.units import inch, cm
@@ -440,6 +440,10 @@ def validate_loan_eligibility(
     # Get existing loan EMIs for FOIR calculation - convert to float
     existing_loans = customer.get("existing_loans", [])
     total_existing_emi = float(sum(float(loan.get("emi", 0)) for loan in existing_loans))
+    
+    # CRITICAL: Also include EMIs from previously sanctioned loans
+    sanctioned_emi = get_sanctioned_loans_emi(customer_id)
+    total_existing_emi += sanctioned_emi
 
     # Rule 1: Credit score check
     if credit_score < 700:

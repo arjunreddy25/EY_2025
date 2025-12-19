@@ -291,6 +291,27 @@ def get_loan_applications(customer_id: str) -> list:
         return []
 
 
+def get_sanctioned_loans_emi(customer_id: str) -> float:
+    """Fetch total EMI from sanctioned loan applications for a customer."""
+    try:
+        with get_db() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT COALESCE(SUM(monthly_emi), 0) as total_emi
+                    FROM loan_applications 
+                    WHERE customer_id = %s AND status = 'SANCTIONED'
+                    """,
+                    (customer_id,)
+                )
+                result = cur.fetchone()
+                return float(result['total_emi']) if result else 0.0
+    except Exception as e:
+        print(f"❌ Error fetching sanctioned loans EMI: {e}")
+        return 0.0
+
+
+
 def get_latest_loan_status(customer_id: str) -> Optional[Dict[str, Any]]:
     """Get the most recent loan application status for a customer."""
     try:

@@ -61,7 +61,6 @@ def upload_file_to_s3(file_path: str, object_name: str = None) -> str:
 
     except ClientError as e:
         print(f"❌ S3 Upload Error: {e}")
-        # Try to generate a presigned URL if upload worked but we can't construct generic URL (unlikely error path but good to have fallback thought)
         return None
     except Exception as e:
         print(f"❌ Error uploading to S3: {e}")
