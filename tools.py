@@ -246,6 +246,31 @@ def explore_loan_options(
     
     credit_score = customer.get("credit_score", 700)
     pre_approved_limit = float(customer.get("pre_approved_limit", 0))
+    salary = float(customer.get("monthly_salary", customer.get("salary", 0)))
+    
+    # ==========================================================
+    # DETERMINISTIC FOIR PRE-CHECK (code-level, not prompt-based)
+    # ==========================================================
+    # Get existing EMI obligations (static + sanctioned loans)
+    existing_loans = customer.get("existing_loans", [])
+    total_existing_emi = float(sum(float(loan.get("emi", 0)) for loan in existing_loans))
+    sanctioned_emi = get_sanctioned_loans_emi(customer_id)
+    total_existing_emi += sanctioned_emi
+    
+    # Calculate current FOIR (without any new loan)
+    current_foir = (total_existing_emi / salary) * 100 if salary > 0 else 100
+    
+    # If FOIR is already at or above 50%, customer cannot take ANY new loan
+    if current_foir >= 50:
+        return json.dumps({
+            "status": "blocked",
+            "reason": "FOIR_EXCEEDED",
+            "message": f"Your current debt-to-income ratio is {current_foir:.1f}%, which already exceeds our 50% limit. You cannot take additional loans until existing EMIs are reduced.",
+            "current_foir": round(current_foir, 1),
+            "existing_emi": round(total_existing_emi, 2),
+            "monthly_salary": salary,
+            "suggestion": "Pay down existing loans or wait for some to complete before applying again."
+        })
     
     # Use pre_approved_limit if no specific amount requested
     amount = loan_amount if loan_amount else pre_approved_limit

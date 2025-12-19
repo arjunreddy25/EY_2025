@@ -105,6 +105,8 @@ DEFAULT_SESSION_STATE = {
     # Status flags
     "kyc_verified": False,
     "loan_approved": False,
+    "loan_rejected": False,
+    "rejection_reason": None,
     "salary_verified": False,
 }
 
@@ -117,16 +119,14 @@ loan_sales_team = Team(
         underwriting_agent,
         sanction_agent
     ],
-    instructions="You are a loan sales assistant. Coordinate with your team members to help customers get personal loans. Delegate tasks based on what the customer needs.",
+    instructions="You are a professional loan sales assistant. Coordinate with your team to help customers get personal loans. Delegate tasks based on customer needs.",
     db=db,
     session_state=DEFAULT_SESSION_STATE,
-    add_session_state_to_context=True,  # Agents see customer profile automatically
-    # enable_agentic_state=True,        # DISABLED: Causes schema validation errors with update_session_state tool
+    add_session_state_to_context=True,
     add_history_to_context=True,
     show_members_responses=True,
     markdown=True,
     share_member_interactions=True,
-    # Agno Guardrails: Protect against prompt injection and PII leakage
     pre_hooks=[PromptInjectionGuardrail(), PIIDetectionGuardrail()]
 )
 
