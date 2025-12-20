@@ -85,12 +85,16 @@ export function useChat(options: UseChatOptions = {}) {
   const queryClient = useQueryClient();
   const { data: sessions = [], isLoading: isLoadingSessions } = useSessions();
 
-  // Only fetch session if it exists in sessions list
-  const sessionExists = sessions.some((s) => s.id === currentSessionId);
-  const { data: sessionData, isLoading: isSessionDataLoading } = useSession(sessionExists ? currentSessionId : null);
+  // Check if session exists in cached list (for display optimization)
+  const sessionExistsInList = sessions.some((s) => s.id === currentSessionId);
+
+  // Fetch session data if we have a session ID from URL (initialSessionId)
+  // This allows newly created sessions to load immediately without waiting for sessions list
+  const shouldFetchSession = !!initialSessionId || sessionExistsInList;
+  const { data: sessionData, isLoading: isSessionDataLoading } = useSession(shouldFetchSession ? currentSessionId : null);
 
   // Session is loading when we're fetching existing session data
-  const isLoadingSession = sessionExists && isSessionDataLoading && messages.length === 0;
+  const isLoadingSession = shouldFetchSession && isSessionDataLoading && messages.length === 0;
 
   const createSessionMutation = useCreateSession();
   const deleteSessionMutation = useDeleteSession();
