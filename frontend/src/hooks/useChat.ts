@@ -74,7 +74,6 @@ export function useChat(options: UseChatOptions = {}) {
   // Refs
   const currentMessageRef = useRef<string>('');
   const currentSessionIdRef = useRef(currentSessionId);
-  const autoGreetSentRef = useRef(false);
   const abortControllerRef = useRef<AbortController | null>(null);
 
   // Keep ref in sync
@@ -442,7 +441,6 @@ export function useChat(options: UseChatOptions = {}) {
     setAgentDecisions([]);
     setIsLoading(false);
     setCurrentToolCall(null);
-    autoGreetSentRef.current = false;
 
     // Navigate to welcome screen
     onNavigate?.('/');
@@ -490,48 +488,8 @@ export function useChat(options: UseChatOptions = {}) {
     }
   }, [initialSessionId]);
 
-  // Auto-greet user when they land from email link
-  // Session is NOT created in App.tsx - we create it here when injecting the greeting
-  useEffect(() => {
-    const customer = getCustomerInfo();
-    const isFromEmail = localStorage.getItem('fromEmailRedirect') === 'true';
-
-    if (
-      customer?.customer_id &&
-      isFromEmail &&
-      !autoGreetSentRef.current &&
-      messages.length === 0 &&
-      !isLoading
-    ) {
-      autoGreetSentRef.current = true;
-      localStorage.removeItem('fromEmailRedirect');
-
-      // Inject greeting immediately
-      const greetingMessage: Message = {
-        id: `msg_greeting_${Date.now()}`,
-        role: 'assistant',
-        content: `Hello ${customer.name || 'there'}! 👋\n\nWelcome to NBFC Personal Loans. I'm your digital loan assistant.\n\nGreat news — you've been **pre-approved** for a personal loan! I'm here to help you:\n\n• Calculate your EMI for any amount\n• Complete quick KYC verification\n• Get your loan sanctioned in minutes\n\nHow much loan amount are you looking for, and over what tenure?`,
-        timestamp: new Date(),
-        isStreaming: false,
-        toolCalls: [],
-      };
-      setMessages([greetingMessage]);
-
-      // Create session and save greeting (async, non-blocking)
-      (async () => {
-        try {
-          await createSessionMutation.mutateAsync({
-            sessionId: currentSessionIdRef.current,
-            title: `Chat with ${customer.name || 'Customer'}`,
-          });
-          onNavigate?.(`/chat/${currentSessionIdRef.current}`);
-          saveMessage('assistant', greetingMessage.content);
-        } catch (e) {
-          console.error('Failed to create session for greeting:', e);
-        }
-      })();
-    }
-  }, [messages.length, isLoading, getCustomerInfo, saveMessage, createSessionMutation, onNavigate]);
+  // NOTE: Auto-greet for email redirects is handled in App.tsx RefVerifier
+  // It saves the greeting to DB before navigation, so normal session loading works
 
   // Clear agent decisions (for new sessions)
   const clearAgentDecisions = useCallback(() => {

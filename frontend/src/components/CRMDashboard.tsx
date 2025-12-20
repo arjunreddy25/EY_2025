@@ -3,7 +3,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import {
     Users, Link2, ExternalLink, Copy, Check,
-    RefreshCw, ArrowLeft, Send, Search, Filter, Mail, Trash2
+    RefreshCw, ArrowLeft, Send, Search, Filter, Mail, Trash2, FileText, AlertTriangle
 } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 
@@ -31,6 +31,20 @@ interface LinkRecord {
     used_at: string | null;
 }
 
+interface LoanRecord {
+    application_id: string;
+    customer_id: string;
+    customer_name: string;
+    customer_email: string;
+    amount: number;
+    tenure_months: number;
+    interest_rate: number;
+    monthly_emi: number;
+    status: string;
+    sanction_letter_url?: string;
+    created_at: string;
+}
+
 // Use main API server (consolidated endpoints)
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 
@@ -39,7 +53,7 @@ export function CRMDashboard() {
     const [links, setLinks] = useState<LinkRecord[]>([]);
     const [loading, setLoading] = useState(true);
     const [searchQuery, setSearchQuery] = useState('');
-    const [activeTab, setActiveTab] = useState<'customers' | 'links'>('customers');
+    const [activeTab, setActiveTab] = useState<'customers' | 'links' | 'loans'>('customers');
     const [copiedId, setCopiedId] = useState<string | null>(null);
     const [sendingEmail, setSendingEmail] = useState<string | null>(null);
 
@@ -47,6 +61,9 @@ export function CRMDashboard() {
     const [deletingCustomers, setDeletingCustomers] = useState(false);
     const [selectedCustomers, setSelectedCustomers] = useState<Set<string>>(new Set());
     const [notification, setNotification] = useState<{ type: 'success' | 'error', message: string } | null>(null);
+    const [loans, setLoans] = useState<LoanRecord[]>([]);
+    const [clearingData, setClearingData] = useState(false);
+    const [deletingLoans, setDeletingLoans] = useState<string | null>(null);
 
     const showNotification = (type: 'success' | 'error', message: string) => {
         setNotification({ type, message });
@@ -74,19 +91,70 @@ export function CRMDashboard() {
         }
     }, []);
 
+    const fetchLoans = useCallback(async () => {
+        try {
+            const response = await fetch(`${API_URL}/crm/loans`);
+            const data = await response.json();
+            setLoans(data.loans || []);
+        } catch (error) {
+            console.error('Failed to fetch loans:', error);
+        }
+    }, []);
+
     useEffect(() => {
         const loadData = async () => {
             setLoading(true);
-            await Promise.all([fetchCustomers(), fetchLinks()]);
+            await Promise.all([fetchCustomers(), fetchLinks(), fetchLoans()]);
             setLoading(false);
         };
         loadData();
-    }, [fetchCustomers, fetchLinks]);
+    }, [fetchCustomers, fetchLinks, fetchLoans]);
 
     const handleRefresh = async () => {
         setLoading(true);
-        await Promise.all([fetchCustomers(), fetchLinks()]);
+        await Promise.all([fetchCustomers(), fetchLinks(), fetchLoans()]);
         setLoading(false);
+    };
+
+    const clearAllData = async () => {
+        const confirmed = window.confirm(
+            'This will delete ALL chat sessions, loans, and links. Customers will be kept. Continue?'
+        );
+        if (!confirmed) return;
+
+        setClearingData(true);
+        try {
+            const response = await fetch(`${API_URL}/crm/clear-data`, { method: 'POST' });
+            const data = await response.json();
+            showNotification(
+                'success',
+                `Cleared: ${data.deleted?.chat_sessions || 0} sessions, ${data.deleted?.loan_applications || 0} loans, ${data.deleted?.customer_links || 0} links`
+            );
+            await Promise.all([fetchLinks(), fetchLoans()]);
+        } catch (error) {
+            console.error('Failed to clear data:', error);
+            showNotification('error', 'Failed to clear data');
+        } finally {
+            setClearingData(false);
+        }
+    };
+
+    const deleteCustomerLoans = async (customerId: string) => {
+        const confirmed = window.confirm(`Delete all loans for this customer?`);
+        if (!confirmed) return;
+
+        setDeletingLoans(customerId);
+        try {
+            const response = await fetch(`${API_URL}/crm/loans/${customerId}`, { method: 'DELETE' });
+            const data = await response.json();
+            showNotification('success', `Deleted ${data.deleted_count} loans`);
+            await fetchLoans();
+        } catch (error) {
+            console.error('Failed to delete loans:', error);
+            showNotification('error', 'Failed to delete loans');
+        } finally {
+            setDeletingLoans(null);
+        }
     };
 
 
@@ -383,6 +451,26 @@ export function CRMDashboard() {
                             <Link2 className="size-4 mr-2" />
                             Generated Links
                         </Button>
+                        <Button
+                            variant={activeTab === 'loans' ? 'default' : 'outline'}
+                            onClick={() => setActiveTab('loans')}
+                        >
+                            <FileText className="size-4 mr-2" />
+                            Loans ({loans.length})
+                        </Button>
+                        <Button
+                            variant="outline"
+                            className="border-red-500/50 text-red-600 hover:bg-red-50 dark:hover:bg-red-950"
+                            onClick={clearAllData}
+                            disabled={clearingData}
+                        >
+                            {clearingData ? (
+                                <RefreshCw className="size-4 mr-2 animate-spin" />
+                            ) : (
+                                <AlertTriangle className="size-4 mr-2" />
+                            )}
+                            Clear All Data
+                        </Button>
                     </div>
                 </div>
 
@@ -462,7 +550,7 @@ export function CRMDashboard() {
                             ))
                         )}
                     </div>
-                ) : (
+                    ) : activeTab === 'links' ? (
                     /* Links Tab */
                     <div className="grid gap-4">
                         {filteredLinks.length === 0 ? (
@@ -542,7 +630,78 @@ export function CRMDashboard() {
                             ))
                         )}
                     </div>
-                )}
+                        ) : activeTab === 'loans' ? (
+                            <div className="space-y-4">
+                                {loans.length === 0 ? (
+                                    <Card>
+                                        <CardContent className="py-12 text-center text-muted-foreground">
+                                            <FileText className="size-12 mx-auto mb-4 opacity-50" />
+                                            <p>No loan applications yet</p>
+                                        </CardContent>
+                                    </Card>
+                                ) : (
+                                    loans.map((loan) => (
+                                        <Card key={loan.application_id}>
+                                            <CardContent className="py-4">
+                                                <div className="flex flex-wrap items-center justify-between gap-4">
+                                                    <div className="space-y-1">
+                                                        <div className="font-medium">{loan.customer_name}</div>
+                                                        <div className="text-sm text-muted-foreground">
+                                                            {loan.customer_email}
+                                                        </div>
+                                                        <div className="text-xs text-muted-foreground">
+                                                            Application: {loan.application_id.slice(0, 12)}...
+                                                        </div>
+                                                    </div>
+                                                    <div className="text-center">
+                                                        <div className="text-xl font-bold">Rs. {loan.amount.toLocaleString()}</div>
+                                                        <div className="text-sm text-muted-foreground">
+                                                            {loan.tenure_months} months @ {loan.interest_rate}%
+                                                        </div>
+                                                        <div className="font-medium text-green-600">
+                                                            EMI: Rs. {loan.monthly_emi.toLocaleString()}
+                                                        </div>
+                                                    </div>
+                                                    <div className="text-center">
+                                                        <span className={loan.status === 'sanctioned'
+                                                            ? 'inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300'
+                                                            : 'inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-300'}>
+                                                            {loan.status}
+                                                        </span>
+                                                        <div className="text-xs text-muted-foreground mt-1">
+                                                            {loan.created_at ? new Date(loan.created_at).toLocaleDateString() : 'N/A'}
+                                                        </div>
+                                                    </div>
+                                                    <div className="flex gap-2">
+                                                        {loan.sanction_letter_url && (
+                                                            <Button size="sm" variant="outline" asChild>
+                                                                <a href={loan.sanction_letter_url} target="_blank" rel="noopener noreferrer">
+                                                                    <ExternalLink className="size-4 mr-2" />
+                                                                    Sanction Letter
+                                                                </a>
+                                                            </Button>
+                                            )}
+                                            <Button
+                                                size="sm"
+                                                variant="outline"
+                                                className="border-red-500/50 text-red-600 hover:bg-red-50 dark:hover:bg-red-950"
+                                                onClick={() => deleteCustomerLoans(loan.customer_id)}
+                                                disabled={deletingLoans === loan.customer_id}
+                                            >
+                                                {deletingLoans === loan.customer_id ? (
+                                                    <RefreshCw className="size-4" />
+                                                ) : (
+                                                    <Trash2 className="size-4" />
+                                                )}
+                                            </Button>
+                                        </div>
+                                    </div>
+                                </CardContent>
+                            </Card>
+                        ))
+                        )}
+                    </div>
+                ) : null}
             </main>
         </div>
     );

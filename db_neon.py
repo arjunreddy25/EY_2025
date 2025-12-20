@@ -291,6 +291,75 @@ def get_loan_applications(customer_id: str) -> list:
         return []
 
 
+def get_all_loan_applications() -> list:
+    """Fetch all loan applications with customer info for CRM."""
+    try:
+        with get_db() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT la.application_id, la.customer_id, la.amount, la.tenure_months, 
+                           la.interest_rate, la.monthly_emi, la.status, la.sanction_letter_url, la.created_at,
+                           c.name as customer_name, c.email as customer_email
+                    FROM loan_applications la
+                    JOIN customers c ON la.customer_id = c.customer_id
+                    ORDER BY la.created_at DESC
+                    """
+                )
+                loans = cur.fetchall()
+                result = []
+                for loan in loans:
+                    loan_dict = dict(loan)
+                    for key in ['amount', 'interest_rate', 'monthly_emi']:
+                        if loan_dict.get(key):
+                            loan_dict[key] = float(loan_dict[key])
+                    if loan_dict.get('created_at'):
+                        loan_dict['created_at'] = loan_dict['created_at'].isoformat()
+                    result.append(loan_dict)
+                return result
+    except Exception as e:
+        print(f"❌ Error fetching all loan applications: {e}")
+        return []
+
+
+def delete_customer_loans(customer_id: str) -> int:
+    """Delete all loan applications for a customer. Returns count deleted."""
+    try:
+        with get_db() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "DELETE FROM loan_applications WHERE customer_id = %s",
+                    (customer_id,)
+                )
+                return cur.rowcount
+    except Exception as e:
+        print(f"❌ Error deleting loans for customer {customer_id}: {e}")
+        return 0
+
+
+def clear_all_transactional_data() -> dict:
+    """Clear all transactional data (chats, loans, links) but keep customers."""
+    result = {"chat_sessions": 0, "chat_messages": 0, "loan_applications": 0, "customer_links": 0}
+    try:
+        with get_db() as conn:
+            with conn.cursor() as cur:
+                cur.execute("DELETE FROM chat_messages")
+                result["chat_messages"] = cur.rowcount
+                
+                cur.execute("DELETE FROM chat_sessions")
+                result["chat_sessions"] = cur.rowcount
+                
+                cur.execute("DELETE FROM loan_applications")
+                result["loan_applications"] = cur.rowcount
+                
+                cur.execute("DELETE FROM customer_links")
+                result["customer_links"] = cur.rowcount
+        return result
+    except Exception as e:
+        print(f"❌ Error clearing transactional data: {e}")
+        return result
+
+
 def get_sanctioned_loans_emi(customer_id: str) -> float:
     """Fetch total EMI from sanctioned loan applications for a customer."""
     try:

@@ -31,8 +31,6 @@ function RefVerifier() {
               name: data.name,
               customer_id: data.customer_id
             }));
-            // Mark as fresh arrival from email - will be cleared after greeting
-            localStorage.setItem('fromEmailRedirect', 'true');
 
             // Link any anonymous sessions to this customer
             const storedIds = JSON.parse(localStorage.getItem('chat_session_ids') || '[]');
@@ -48,8 +46,42 @@ function RefVerifier() {
               }
             }
 
-            // Navigate to root - useChat will handle session creation when greeting is shown
-            navigate('/', { replace: true });
+            // Create a new session for this verified customer
+            const newSessionId = `session_${Date.now()}`;
+            try {
+              // 1. Create the session
+              await fetch(`${API_BASE}/chat/sessions`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  session_id: newSessionId,
+                  customer_id: data.customer_id,
+                  title: `Chat with ${data.name || 'Customer'}`
+                })
+              });
+
+              // 2. Save greeting message to DB (so it loads on session fetch)
+              const greeting = `Hello ${data.name || 'there'}! 👋\n\nWelcome to NBFC Personal Loans. I'm your digital loan assistant.\n\nGreat news — you've been **pre-approved** for a personal loan! I'm here to help you:\n\n• Calculate your EMI for any amount\n• Complete quick KYC verification\n• Get your loan sanctioned in minutes\n\nHow much loan amount are you looking for, and over what tenure?`;
+
+              await fetch(`${API_BASE}/chat/sessions/${newSessionId}/messages`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ role: 'assistant', content: greeting })
+              });
+
+              // Track in localStorage
+              const ids = JSON.parse(localStorage.getItem('chat_session_ids') || '[]');
+              if (!ids.includes(newSessionId)) {
+                ids.unshift(newSessionId);
+                localStorage.setItem('chat_session_ids', JSON.stringify(ids.slice(0, 50)));
+              }
+
+              // 3. Navigate to the chat (session already has greeting in DB)
+              navigate(`/chat/${newSessionId}`, { replace: true });
+            } catch (e) {
+              console.warn('Could not create session:', e);
+              navigate('/', { replace: true });
+            }
           }
         })
         .catch(err => {

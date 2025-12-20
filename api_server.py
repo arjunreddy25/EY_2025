@@ -55,7 +55,11 @@ from db_neon import (
     get_loan_applications,
     get_latest_loan_status,
     update_customer_salary_verification,
-    get_customer_documents
+    get_customer_documents,
+    # CRM Loan Management
+    get_all_loan_applications,
+    delete_customer_loans,
+    clear_all_transactional_data
 )
 
 load_dotenv()
@@ -743,6 +747,42 @@ async def list_all_links():
         }
         for link in links
     ]
+
+
+@app.get("/crm/loans")
+async def list_all_loans():
+    """Get all loan applications with customer info for CRM dashboard."""
+    loans = get_all_loan_applications()
+    return {
+        "loans": loans,
+        "total": len(loans),
+        "total_amount": sum(loan.get("amount", 0) for loan in loans)
+    }
+
+
+@app.delete("/crm/loans/{customer_id}")
+async def delete_loans_for_customer(customer_id: str):
+    """Delete all loans for a specific customer."""
+    deleted = delete_customer_loans(customer_id)
+    return {
+        "customer_id": customer_id,
+        "deleted_count": deleted,
+        "status": "success" if deleted > 0 else "no_loans_found"
+    }
+
+
+@app.post("/crm/clear-data")
+async def clear_all_data():
+    """
+    Clear all transactional data (chats, loans, links) but keep customers.
+    Used for demo reset / testing.
+    """
+    result = clear_all_transactional_data()
+    # Also clear localStorage tracking will happen on frontend
+    return {
+        "status": "cleared",
+        "deleted": result
+    }
 
 
 # ============================================
