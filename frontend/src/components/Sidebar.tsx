@@ -15,7 +15,8 @@ import {
   CreditCard,
   LogOut,
   User,
-  Wallet
+  Wallet,
+  Phone
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { ChatSession } from '@/hooks/useChat';
@@ -120,8 +121,21 @@ export function Sidebar({
         {/* Chat History */}
         <ScrollArea className="flex-1 min-h-0">
           <div className="px-3">
+              {/* Not logged in message */}
+              {isOpen && !user && (
+                <div className="py-12 text-center">
+                  <div className="mx-auto mb-3 flex size-12 items-center justify-center rounded-full bg-muted">
+                    <Phone className="size-6 text-muted-foreground" />
+                  </div>
+                  <p className="text-sm font-medium">No access yet</p>
+                  <p className="mt-1 text-xs text-muted-foreground px-4">
+                    Input your phone number to access the chats
+                  </p>
+                </div>
+              )}
+
             {/* Skeleton Loading */}
-            {isOpen && isLoadingSessions && (
+              {isOpen && user && isLoadingSessions && (
               <div className="space-y-2 py-2">
                 {[...Array(4)].map((_, i) => (
                   <div key={i} className="flex items-center gap-3 px-3 py-2">
@@ -133,7 +147,7 @@ export function Sidebar({
             )}
 
             {/* Sessions List - Simple flat list, no date grouping */}
-            {isOpen && !isLoadingSessions && sessions.length > 0 && (
+              {isOpen && user && !isLoadingSessions && sessions.length > 0 && (
               <div className="space-y-1 py-2">
                 {sessions.map((session) => (
                   <div
@@ -172,8 +186,8 @@ export function Sidebar({
               </div>
             )}
 
-            {/* Empty State */}
-            {isOpen && !isLoadingSessions && sessions.length === 0 && (
+              {/* Empty State - only show when logged in */}
+              {isOpen && user && !isLoadingSessions && sessions.length === 0 && (
               <div className="py-12 text-center">
                 <div className="mx-auto mb-3 flex size-12 items-center justify-center rounded-full bg-muted">
                   <MessageSquare className="size-6 text-muted-foreground" />

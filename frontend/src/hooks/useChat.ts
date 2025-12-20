@@ -88,7 +88,10 @@ export function useChat(options: UseChatOptions = {}) {
 
   // Only fetch session if it exists in sessions list
   const sessionExists = sessions.some((s) => s.id === currentSessionId);
-  const { data: sessionData } = useSession(sessionExists ? currentSessionId : null);
+  const { data: sessionData, isLoading: isSessionDataLoading } = useSession(sessionExists ? currentSessionId : null);
+
+  // Session is loading when we're fetching existing session data
+  const isLoadingSession = sessionExists && isSessionDataLoading && messages.length === 0;
 
   const createSessionMutation = useCreateSession();
   const deleteSessionMutation = useDeleteSession();
@@ -538,6 +541,7 @@ export function useChat(options: UseChatOptions = {}) {
     messages,
     isConnected: true, // SSE doesn't need persistent connection
     isLoading,
+    isLoadingSession,
     isLoadingSessions,
     currentToolCall,
     sessions,

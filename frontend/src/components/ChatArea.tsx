@@ -7,6 +7,7 @@ import type { Message } from '@/hooks/useChat';
 interface ChatAreaProps {
   messages: Message[];
   isLoading: boolean;
+  isLoadingSession?: boolean;
   currentToolCall?: string | null;
   latestAgentStatus?: string | null;
   onSuggestionClick?: (suggestion: string) => void;
@@ -15,6 +16,7 @@ interface ChatAreaProps {
 export function ChatArea({ 
   messages, 
   isLoading, 
+  isLoadingSession = false,
   currentToolCall,
   latestAgentStatus,
   onSuggestionClick
@@ -28,6 +30,17 @@ export function ChatArea({
       bottomRef.current.scrollIntoView({ behavior: 'smooth' });
     }
   }, [messages, isLoading]);
+
+  // Loading session - just show skeleton
+  if (isLoadingSession) {
+    return (
+      <div className="flex-1 overflow-y-auto">
+        <div className="mx-auto max-w-3xl pb-4">
+          <MessageListSkeleton />
+        </div>
+      </div>
+    );
+  }
 
   if (messages.length === 0 && !isLoading) {
     return <WelcomeScreen onSuggestionClick={onSuggestionClick} />;
@@ -61,5 +74,3 @@ export function ChatArea({
     </div>
   );
 }
-
-

@@ -3,7 +3,6 @@ import { useNavigate } from 'react-router-dom';
 import { Sidebar } from './Sidebar';
 import { ChatArea } from './ChatArea';
 import { ChatInput } from './ChatInput';
-import { PhoneVerification } from './PhoneVerification';
 import { KYCDialog } from './KYCDialog';
 import { AgentActivityDialog } from './AgentActivityDialog';
 import { Button } from '@/components/ui/button';
@@ -48,6 +47,7 @@ export function ChatLayout({ chatId }: { chatId?: string } = {}) {
   const {
     messages,
     isLoading,
+    isLoadingSession,
     isLoadingSessions,
     currentToolCall,
     sessions,
@@ -135,24 +135,20 @@ export function ChatLayout({ chatId }: { chatId?: string } = {}) {
         <ChatArea
           messages={messages}
           isLoading={isLoading}
+          isLoadingSession={isLoadingSession}
           currentToolCall={currentToolCall}
           latestAgentStatus={agentDecisions.length > 0 ? agentDecisions[agentDecisions.length - 1].summary : null}
           onSuggestionClick={handleSuggestionClick}
         />
 
-        {/* Phone Verification - show if no user */}
-        {!user && (
-          <PhoneVerification
-            onVerified={handleVerified}
-            onNewUser={handleNewUser}
-          />
-        )}
-
-        {/* Chat Input - only enabled if user is verified */}
+        {/* Chat Input - with integrated phone verification */}
         <ChatInput
           onSend={sendMessage}
           isLoading={isLoading}
           disabled={!user}
+          showPhoneInput={!user}
+          onPhoneVerified={handleVerified}
+          onNewUser={handleNewUser}
         />
       </div>
 
