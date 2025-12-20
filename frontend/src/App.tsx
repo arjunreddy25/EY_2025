@@ -48,33 +48,8 @@ function RefVerifier() {
               }
             }
 
-            // Create a new session for this verified customer
-            const newSessionId = `session_${Date.now()}`;
-            try {
-              await fetch(`${API_BASE}/chat/sessions`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                  session_id: newSessionId,
-                  customer_id: data.customer_id,
-                  title: 'New Chat'
-                })
-              });
-              // Track in localStorage
-              const ids = JSON.parse(localStorage.getItem('chat_session_ids') || '[]');
-              if (!ids.includes(newSessionId)) {
-                ids.unshift(newSessionId);
-                localStorage.setItem('chat_session_ids', JSON.stringify(ids.slice(0, 50)));
-              }
-            } catch (e) {
-              console.warn('Could not create session:', e);
-            }
-
-            // Signal to React Query that sessions cache needs refresh
-            localStorage.setItem('newSessionToRefetch', newSessionId);
-
-            // Navigate to the new chat
-            navigate(`/chat/${newSessionId}`, { replace: true });
+            // Navigate to root - useChat will handle session creation when greeting is shown
+            navigate('/', { replace: true });
           }
         })
         .catch(err => {

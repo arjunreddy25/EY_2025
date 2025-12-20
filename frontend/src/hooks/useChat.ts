@@ -491,6 +491,7 @@ export function useChat(options: UseChatOptions = {}) {
   }, [initialSessionId]);
 
   // Auto-greet user when they land from email link
+  // Session is NOT created in App.tsx - we create it here when injecting the greeting
   useEffect(() => {
     const customer = getCustomerInfo();
     const isFromEmail = localStorage.getItem('fromEmailRedirect') === 'true';
@@ -516,8 +517,8 @@ export function useChat(options: UseChatOptions = {}) {
       };
       setMessages([greetingMessage]);
 
-      // Create session and save greeting after small delay
-      setTimeout(async () => {
+      // Create session and save greeting (async, non-blocking)
+      (async () => {
         try {
           await createSessionMutation.mutateAsync({
             sessionId: currentSessionIdRef.current,
@@ -528,7 +529,7 @@ export function useChat(options: UseChatOptions = {}) {
         } catch (e) {
           console.error('Failed to create session for greeting:', e);
         }
-      }, 300);
+      })();
     }
   }, [messages.length, isLoading, getCustomerInfo, saveMessage, createSessionMutation, onNavigate]);
 
